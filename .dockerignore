@@ -1,0 +1,20 @@
+# The image only needs config.yaml and scripts/render_start.sh.
+.git
+.github
+.env
+.env.*
+generated-keys.json
+__pycache__/
+*.pyc
+.pytest_cache/
+coverage.xml
+htmlcov/
+.vscode/
+.idea/
+.DS_Store
+README.md
+SECURITY.md
+render.yaml
+tests/
+scripts/*.py
+customer-profiles*.json

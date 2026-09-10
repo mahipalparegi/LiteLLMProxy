@@ -1,0 +1,44 @@
+[
+  {
+    "key_alias": "acme-corp",
+    "models": ["claude-sonnet-5", "claude-haiku-4-5"],
+    "max_budget": 1000,
+    "budget_duration": "30d",
+    "rpm_limit": 300,
+    "tpm_limit": 1000000,
+    "max_parallel_requests": 15
+  },
+  {
+    "key_alias": "globex",
+    "models": ["gpt-5.6", "gpt-5.6-luna"],
+    "max_budget": 500,
+    "budget_duration": "30d",
+    "rpm_limit": 120,
+    "tpm_limit": 400000,
+    "max_parallel_requests": 8
+  },
+  {
+    "key_alias": "initech-premium",
+    "models": [
+      "claude-opus-5",
+      "claude-sonnet-5",
+      "claude-haiku-4-5",
+      "gpt-5.5",
+      "gpt-5.6"
+    ],
+    "max_budget": 4000,
+    "budget_duration": "30d",
+    "rpm_limit": 600,
+    "tpm_limit": 2000000,
+    "max_parallel_requests": 25
+  },
+  {
+    "key_alias": "hooli-everything",
+    "models": ["customer-models"],
+    "max_budget": 2500,
+    "budget_duration": "30d",
+    "rpm_limit": 600,
+    "tpm_limit": 2000000,
+    "max_parallel_requests": 25
+  }
+]

@@ -1,0 +1,83 @@
+# Render Blueprint. Fields validated against https://render.com/docs/blueprint-spec
+# Validate locally with: render blueprints validate render.yaml
+services:
+  - type: web
+    name: litellm-azure-proxy
+    runtime: docker
+    # 4 workers x (1 vCPU + 4 GB), LiteLLM's documented per-worker floor. 4 GB is
+    # a floor, not a target: the Prisma query engine's resident memory is a
+    # high-water mark set by its largest-ever spend write, so an
+    # under-provisioned instance gets OOM-killed by one big write.
+    plan: 4c-16g
+    region: virginia
+    numInstances: 2
+    dockerContext: .
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health/readiness
+    # Migrations run once per deploy, not once per instance. The inline override
+    # is required because the service sets DISABLE_SCHEMA_UPDATE=true.
+    preDeployCommand: DISABLE_SCHEMA_UPDATE=false litellm --config /app/config.yaml --skip_server_startup
+    maxShutdownDelaySeconds: 120
+    envVars:
+      - key: PORT
+        value: "4000"
+      - key: STORE_MODEL_IN_DB
+        value: "True"
+      - key: LITELLM_LOG
+        value: INFO
+      # Disables load_dotenv so a stray .env cannot inject credentials.
+      - key: LITELLM_MODE
+        value: PRODUCTION
+      - key: LITELLM_NUM_WORKERS
+        value: "4"
+      - key: DISABLE_SCHEMA_UPDATE
+        value: "true"
+      - key: AZURE_SCOPE
+        value: https://cognitiveservices.azure.com/.default
+
+      - key: DATABASE_URL
+        fromDatabase:
+          name: litellm-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: litellm-cache
+          type: keyvalue
+          property: connectionString
+
+      # Render prompts for sync:false values during initial Blueprint creation
+      # only. Later updates do not re-prompt; add new secrets by hand.
+      - key: LITELLM_MASTER_KEY
+        sync: false
+      - key: LITELLM_SALT_KEY
+        sync: false
+      - key: AZURE_API_BASE
+        sync: false
+      - key: AZURE_OPENAI_API_BASE
+        sync: false
+      - key: AZURE_OPENAI_API_VERSION
+        sync: false
+      - key: AZURE_TENANT_ID
+        sync: false
+      - key: AZURE_CLIENT_ID
+        sync: false
+      - key: AZURE_CLIENT_SECRET
+        sync: false
+
+  - type: keyvalue
+    name: litellm-cache
+    plan: 1g
+    region: virginia
+    # Empty list blocks every external connection: private network only.
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+
+databases:
+  - name: litellm-postgres
+    databaseName: litellm
+    user: litellm
+    region: virginia
+    # LiteLLM's documented sizing row for up to 1K sustained RPS, and a 400
+    # connection ceiling against the 160 this deployment asks for.
+    plan: 4c-16g
+    postgresMajorVersion: "16"

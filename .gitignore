@@ -1,0 +1,22 @@
+# Secrets and generated credential material
+.env
+.env.*
+!.env.example
+generated-keys.json
+
+# Real customer profiles: commercial terms, not secrets, but not for this repo.
+customer-profiles.json
+customer-profiles.*.json
+!customer-profiles.example.json
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+coverage.xml
+htmlcov/
+
+# Editors and OS
+.DS_Store
+.vscode/
+.idea/

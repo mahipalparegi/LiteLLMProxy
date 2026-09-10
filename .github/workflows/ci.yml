@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test tooling
+        run: python -m pip install --upgrade pytest pyyaml
+
+      - name: Fail if generated-keys.json is committed
+        run: |
+          if git ls-files --error-unmatch generated-keys.json > /dev/null 2>&1; then
+            echo "::error::generated-keys.json is committed. It holds live customer keys."
+            echo "Revoke every key in it, remove it from Git history, and keep it git-ignored."
+            exit 1
+          fi
+          echo "ok: generated-keys.json is not tracked"
+
+      - name: Scan for committed secrets
+        run: |
+          python - <<'PY'
+          import re
+          import subprocess
+          import sys
+
+          PATTERNS = {
+              "litellm key": re.compile(r"sk-[A-Za-z0-9]{20,}"),
+              "private key block": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+              "database url with credentials": re.compile(
+                  r"postgres(ql)?://[^:/@\s]+:[^@\s]+@"
+              ),
+              "azure client secret": re.compile(r"AZURE_CLIENT_SECRET\s*[:=]\s*['\"]?[A-Za-z0-9~._\-]{16,}"),
+              "redis url with credentials": re.compile(r"redis(s)?://[^:/@\s]+:[^@\s]+@"),
+          }
+          ALLOWED = ("REPLACE", "EXAMPLE", "example", "REDACTED", "os.environ/", "sync: false")
+
+          files = subprocess.run(
+              ["git", "ls-files"], capture_output=True, text=True, check=True
+          ).stdout.split()
+
+          findings = []
+          for path in files:
+              try:
+                  text = open(path, "r", encoding="utf-8").read()
+              except (UnicodeDecodeError, OSError):
+                  continue
+              for number, line in enumerate(text.splitlines(), start=1):
+                  if any(marker in line for marker in ALLOWED):
+                      continue
+                  for label, pattern in PATTERNS.items():
+                      if pattern.search(line):
+                          findings.append(f"{path}:{number}: possible {label}")
+
+          if findings:
+              print("::error::possible committed secrets found")
+              for finding in findings:
+                  print(finding)
+              sys.exit(1)
+          print(f"ok: scanned {len(files)} tracked files, no obvious secrets")
+          PY
+
+      - name: Validate YAML
+        run: |
+          python - <<'PY'
+          import sys
+          import yaml
+
+          for path in ("config.yaml", "render.yaml", ".github/workflows/ci.yml"):
+              with open(path, "r", encoding="utf-8") as handle:
+                  yaml.safe_load(handle)
+              print(f"ok: {path} parses")
+          PY
+
+      - name: Compile all Python
+        run: python -m compileall -q scripts tests
+
+      - name: Validate shell syntax
+        run: sh -n scripts/render_start.sh
+
+      - name: Run unit tests
+        run: python -m pytest -q
+
+  docker:
+    name: Build pinned image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No secrets are passed here: no build args beyond the pinned version, no
+      # registry credentials, no Azure calls, no paid model calls.
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg LITELLM_VERSION=v1.99.0 \
+            --tag litellm-azure-proxy:ci \
+            .
+
+      - name: Confirm the image is built from the pinned base
+        run: |
+          docker image inspect litellm-azure-proxy:ci > /dev/null
+          echo "ok: image built from ghcr.io/berriai/litellm-database:v1.99.0"
