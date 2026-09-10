@@ -286,12 +286,20 @@ def test_config_reads_every_credential_from_the_environment() -> None:
         assert "api_key" not in params
 
 
-def test_config_contains_no_inline_credential_and_no_invented_price() -> None:
+def test_config_contains_no_inline_credential() -> None:
     rendered = yaml.safe_dump(load_yaml("config.yaml"))
     assert "sk-" not in rendered
     assert "azure.com" not in rendered  # only env var references are allowed
-    assert "input_cost_per_token" not in rendered
-    assert "output_cost_per_token" not in rendered
+
+
+def test_only_models_the_cost_map_cannot_resolve_carry_an_inline_price() -> None:
+    """A price in config is a maintenance burden, so it is allowed only where the
+    cost-map lookup genuinely cannot work."""
+
+    for entry in models():
+        priced = {"input_cost_per_token", "output_cost_per_token"} & set(entry["model_info"])
+        resolvable = entry["litellm_params"]["model"] == f"azure/{entry['model_name']}"
+        assert not (priced and resolvable), entry["model_name"]
 
 
 def test_access_group_is_the_customer_boundary() -> None:
@@ -306,16 +314,30 @@ def test_access_group_is_the_customer_boundary() -> None:
         assert groups == [PREVIEW_ACCESS_GROUP]
 
 
-def test_gpt6_is_pinned_to_the_gpt5_reasoning_route() -> None:
-    """The rewrite gate is `"gpt-5" in model`, which gpt-6 fails. Drop the prefix
-    and every caller sending max_tokens gets a 400."""
+def test_a_routing_prefix_is_never_used_without_explicit_pricing() -> None:
+    """A prefix like gpt5_series/ defeats the cost-map lookup, and LiteLLM skips
+    budget checks entirely for a zero-priced model. Measured on the live resource:
+    azure/gpt5_series/gpt-6-astra reported input/output cost 0 and no
+    x-litellm-response-cost header. Any decorated model string must therefore carry
+    its own price."""
 
-    by_name = {entry["model_name"]: entry for entry in models()}
-    astra = by_name.get("gpt-6-astra")
-    if astra is None:
-        pytest.skip("gpt-6-astra is not configured")
-    if "ARG LITELLM_VERSION=v1.99.0" in read("Dockerfile"):
-        assert astra["litellm_params"]["model"] == "azure/gpt5_series/gpt-6-astra"
+    for entry in models():
+        model = entry["litellm_params"]["model"]
+        if model == f"azure/{entry['model_name']}":
+            continue
+        info = entry["model_info"]
+        assert info.get("input_cost_per_token"), entry["model_name"]
+        assert info.get("output_cost_per_token"), entry["model_name"]
+
+
+def test_no_model_is_priced_at_zero() -> None:
+    """Zero is not just mispriced: it is a free bypass for an exhausted key."""
+
+    for entry in models():
+        info = entry["model_info"]
+        for field in ("input_cost_per_token", "output_cost_per_token"):
+            if field in info:
+                assert info[field] > 0, f"{entry['model_name']}.{field}"
 
 
 def test_the_preview_group_is_never_also_a_customer_group() -> None:
@@ -329,7 +351,15 @@ def test_the_preview_group_is_never_also_a_customer_group() -> None:
 def test_model_list_entries_carry_no_extra_keys() -> None:
     for entry in models():
         assert set(entry) == {"model_name", "litellm_params", "model_info"}
-        assert set(entry["model_info"]) == {"mode", "access_groups"}
+        # Pricing keys are optional and only needed when the cost map cannot
+        # resolve the model string; see the routing-prefix test.
+        assert set(entry["model_info"]) <= {
+            "mode",
+            "access_groups",
+            "input_cost_per_token",
+            "output_cost_per_token",
+        }
+        assert {"mode", "access_groups"} <= set(entry["model_info"])
         assert entry["model_info"]["mode"] == "chat"
         assert set(entry["litellm_params"]) == {
             "model",

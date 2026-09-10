@@ -54,10 +54,16 @@ model_list:
       mode: chat
       access_groups: ["customer-models"]
 
-  # gpt5_series/ selects LiteLLM's GPT-5 request path (renames max_tokens to
-  # max_completion_tokens); the gate is `"gpt-5" in model`, which gpt-6 fails.
-  # Stripped before the deployment path is built, so this still calls gpt-6-astra.
-  # Removing it makes every max_tokens request 400.
+  # gpt5_series/ puts this on LiteLLM's GPT-5 request path so max_tokens is renamed
+  # to max_completion_tokens; the gate is `"gpt-5" in model`, which gpt-6 fails. The
+  # prefix is stripped before the deployment path is built, so this still calls the
+  # gpt-6-astra deployment.
+  #
+  # The prefix also defeats the cost-map lookup, which would leave the model priced
+  # at 0 - and LiteLLM skips budget checks entirely for zero-priced models. The
+  # explicit rates below are therefore mandatory, not optional. GPT-6 Astra list
+  # price is $10 / 1M input and $50 / 1M output; reconcile against your own Azure
+  # invoice and re-check after any price change.
   - model_name: gpt-6-astra
     litellm_params:
       model: azure/gpt5_series/gpt-6-astra
@@ -69,9 +75,11 @@ model_list:
     model_info:
       mode: chat
       access_groups: ["customer-models"]
+      input_cost_per_token: 0.00001
+      output_cost_per_token: 0.00005
 
-  # No prices are set here. Override only from official Microsoft pricing, and
-  # never with 0 - LiteLLM skips budget checks entirely for zero-cost models.
+  # Only gpt-6-astra pins a price, because only its model string is unresolvable by
+  # the cost map. Take any override from official Microsoft pricing, never 0.
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

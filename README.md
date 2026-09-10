@@ -35,7 +35,7 @@ operator scripts.
 </tr>
 <tr>
 <td><code>gpt-6-astra</code></td>
-<td><code>azure/gpt5_series/</code></td>
+<td><code>azure/gpt5_series/</code><br><sub>+ pinned price</sub></td>
 <td>🟢 <code>customer-models</code></td>
 </tr>
 </table>
@@ -53,21 +53,21 @@ Three things that surprise people, all measured against the live resource:
 | **Deployment names are yours** | The aliases above are defaults. They must match your Foundry deployment names character for character. |
 
 > [!IMPORTANT]
-> **`gpt5_series/` on `gpt-6-astra` is not a claim that it is a GPT-5 model.** It is
-> LiteLLM's name for a *request-shaping path*: rename `max_tokens` to
-> `max_completion_tokens`, allow `reasoning_effort`, refuse `temperature` — the
-> contract GPT-6 also uses. The gate is a literal name test, identical in v1.99.0
-> and the current v1.100.0, so upgrading does not remove the need for it:
+> **`gpt-6-astra` needs two things together, and neither works alone.**
 >
-> ```python
-> return "gpt-5" in model or "gpt5_series" in model
-> ```
+> 1. **`gpt5_series/` prefix.** v1.99.0 decides whether to rename `max_tokens` with
+>    `return "gpt-5" in model or "gpt5_series" in model`, which `gpt-6-astra` fails.
+>    The gate is identical in v1.100.0, so upgrading does not fix it. The prefix is
+>    stripped before the deployment path is built, so the call still lands on the
+>    `gpt-6-astra` deployment. Without it, every `max_tokens` request gets `400`.
+> 2. **A pinned price.** The prefix also defeats the cost-map lookup, dropping
+>    mapped pricing to `0 / 0`. LiteLLM **skips budget checks entirely for a
+>    zero-priced model**, so the prefix alone turns it into a free bypass for an
+>    exhausted key. `input_cost_per_token: 0.00001` and
+>    `output_cost_per_token: 0.00005` restore enforcement.
 >
-> `"gpt-6-astra"` fails the first branch, leaving the second as the only way in.
-> The prefix never reaches Azure — `transform_request` strips it before the
-> deployment path is built, and the live response confirms it by reporting
-> `model=gpt-6-astra-2026-09-03`. Remove it and every customer sending
-> `max_tokens` gets a `400`.
+> A contract test enforces the pairing: any decorated model string must carry its
+> own price, and no price may be zero. Both guards were mutation-tested.
 
 ---
 
@@ -595,22 +595,46 @@ The `403` and `429` paths need no Azure credentials: the proxy refuses before it
 would call a provider, which is the property that matters.
 
 <details>
-<summary><b>Why <code>gpt-6-astra</code> carries a routing prefix — one request per row</b></summary>
+<summary><b>How the <code>gpt-6-astra</code> configuration was arrived at — one request per row</b></summary>
 
-| Model string sent to LiteLLM | Params | Result |
-| :-- | :-- | :-- |
-| `azure/gpt-6-astra` | `max_tokens` | `400` — *'max_tokens' is not supported with this model* |
-| `azure/gpt5_series/gpt-6-astra` | `max_tokens` | `200`, served by `gpt-6-astra-2026-09-03` |
-| `azure/gpt5_series/gpt-6-astra` | `max_completion_tokens` | `200` |
-| `azure/gpt5_series/gpt-6-astra` | `max_tokens` + `reasoning_effort` | `200` |
-| `azure/gpt5_series/gpt-6-astra` | `max_tokens` + `temperature: 0.7` | `400` — temperature |
-| `azure/gpt-5.6-sol` | `max_tokens` + `temperature: 0.7` | `400` — temperature |
-| `azure/gpt-5.5` | `max_tokens` + `temperature: 0.7` | `400` — temperature |
+| Model string | `model_info` price | Params | HTTP | Recorded cost |
+| :-- | :-- | :-- | :-- | :-- |
+| `azure/gpt-6-astra` | from cost map | `max_completion_tokens` | `200` | `0.00033` ✅ |
+| `azure/gpt-6-astra` | from cost map | `max_tokens` | `400` | — *'max_tokens' is not supported* |
+| `azure/gpt5_series/gpt-6-astra` | none → `0 / 0` | `max_tokens` | `200` | **none** ❌ |
+| `azure/gpt5_series/gpt-6-astra` | `base_model` attempt | `max_tokens` | `404` | — value leaked into the URL |
+| **`azure/gpt5_series/gpt-6-astra`** | **pinned `1e-05 / 5e-05`** | **`max_tokens`** | **`200`** | **`0.0003`** ✅ |
 
-The response reporting `gpt-6-astra-2026-09-03` proves the prefix does not leak
-into the deployment path. The last three rows are why `gpt-6-astra` is **not** a
-special case: `temperature` is refused by every model here, so with the prefix in
-place it behaves exactly like the `gpt-5.6` series.
+Only the last row satisfies both requirements, and it is what ships.
+`model_info.base_model` looked like the textbook repair and is not: it reached the
+deployment path and produced `404 Resource not found`.
+
+The pinned rate is corroborated two ways. GPT-6 Astra list price is
+$10 / 1M input and $50 / 1M output, and the cost this resource recorded before the
+prefix reconciles exactly:
+
+```
+8 prompt  × $10/M = 0.00008
+5 output  × $50/M = 0.00025
+                    ────────
+                    0.00033   = the measured value
+```
+
+Verified after pinning, against the real resource, every model in one run:
+
+| Alias | tokens in/out | cost header | expected from pinned rates |
+| :-- | :-- | :-- | :-- |
+| `gpt-5.5` | 10 / 16 | `0.00053` | `0.00053` ✅ |
+| `gpt-5.6-sol` | 10 / 5 | `0.0002` | `0.0002` ✅ |
+| `gpt-5.6-terra` | 10 / 5 | `0.00008` | `0.00008` ✅ |
+| `gpt-5.6-luna` | 10 / 5 | `0.000008` | `0.000008` ✅ |
+| `gpt-6-astra` | 10 / 4 | `0.0003` | `0.0003` ✅ |
+
+`gpt-6-astra` also reported `served as: gpt-6-astra`, confirming the prefix still
+does not change which deployment answers.
+
+`temperature` is refused by **every** model here, not just `gpt-6-astra`, so it was
+never the distinguishing factor.
 
 </details>
 
@@ -744,6 +768,11 @@ To override a price, add to `model_info`:
       input_cost_per_token: 0.0000xx     # official Azure price
       output_cost_per_token: 0.0000yy    # official Azure price
 ```
+
+`gpt-6-astra` is the only model here that needs this, because its `gpt5_series/`
+prefix makes the cost-map lookup fail. Everything else uses LiteLLM's mapped
+pricing, and a contract test refuses an inline price on any model that does not
+need one.
 
 ---
 
@@ -929,7 +958,7 @@ CI runs the same checks on every push and PR, plus a committed-secret scan and a
 ## Known deviations from the original brief
 
 <details>
-<summary><b>Seven documented deviations, with reasons</b></summary>
+<summary><b>Eight documented deviations, with reasons</b></summary>
 
 1. **Render plan names.** `plan: standard` and `plan: basic-1gb` are not valid
    Blueprint values; the spec documents compute **plan IDs**. Sized for real
@@ -942,17 +971,22 @@ CI runs the same checks on every push and PR, plus a committed-secret scan and a
    left as configuration that cannot work. `AZURE_PREFIXES` still accepts
    `azure_ai/` so a future non-OpenAI Foundry model needs no code change.
 4. **Aliases were guesses** until reconciled against the live resource. All five
-   are now confirmed, and `gpt-6-astra` sits in `customer-models` with the rest
-   because the `gpt5_series/` prefix makes its request handling identical.
-5. **Entrypoint override**, so the deployment contract is validated before the
+   are now confirmed and all five are in `customer-models`. `gpt-6-astra` carries
+   the `gpt5_series/` routing prefix **and** a pinned price, because the prefix is
+   what makes `max_tokens` work and it is also what breaks the cost-map lookup.
+5. **One inline price.** No price is invented, and only `gpt-6-astra` has one,
+   because only its model string is unresolvable by the cost map. Everything else
+   uses LiteLLM's mapped pricing. Re-check the pinned rate whenever Azure pricing
+   changes.
+6. **Entrypoint override**, so the deployment contract is validated before the
    CLI starts. Migrations stay at proxy startup: `preDeployCommand` exited `128`
    with no output, most likely because it passes through the overridden
    `ENTRYPOINT`.
-6. **No `api_version` anywhere.** v1.99.0 ships
+7. **No `api_version` anywhere.** v1.99.0 ships
    `AZURE_DEFAULT_API_VERSION = 2025-02-01-preview`, verified inside the pinned
    image, so `AZURE_OPENAI_API_VERSION` was dropped and `AZURE_API_VERSION`
    remains as the documented override.
-7. **No `USER` line.** The pinned `litellm-database` image defines no non-root
+8. **No `USER` line.** The pinned `litellm-database` image defines no non-root
    user, and forcing an arbitrary UID breaks the startup migration. The non-root
    variant is a separate image (`litellm-non_root`) without Prisma.
 
