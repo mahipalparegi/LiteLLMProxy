@@ -58,7 +58,7 @@ except ImportError:  # run directly: python scripts/test_limits.py
     )
 
 CONFIRMATION = "SPEND MONEY"
-PRIMARY_MODEL = "gpt-5.6"
+PRIMARY_MODEL = "gpt-5.6-sol"
 SECONDARY_MODEL = "gpt-5.5"
 CI_MARKERS = ("CI", "GITHUB_ACTIONS", "BUILD_ID", "RENDER")
 

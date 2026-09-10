@@ -67,7 +67,7 @@ Explicitly **not** covered:
   cannot be granted to anyone, and a model added to the group does not reach any
   existing key whose profile did not name it.
 - Enforcement is per request, verified: a key holding
-  `["gpt-5.6","gpt-5.6-luna"]` calling `gpt-5.5` receives `403
+  `["gpt-5.6-sol","gpt-5.6-luna"]` calling `gpt-5.5` receives `403
   key not allowed to access model`, naming only the models it does hold.
 - `scripts/create_virtual_keys.py` rejects a profile that requests a model
   outside the catalogue, and rejects unknown profile fields outright so a
@@ -223,7 +223,9 @@ Postgres and the Key Value instance are both part of the enforcement path.
 - One dedicated Entra app registration for this proxy. Not a shared app, not a
   human identity.
 - Role assignment at **resource scope** on the Foundry / Azure AI Services
-  resource: **Azure AI User** or **Cognitive Services User**.
+  resource: **Cognitive Services OpenAI User** — the least-privilege role that
+  permits Entra inference calls and nothing else. Not `Cognitive Services
+  Contributor` (cannot do inference), not `Owner`.
 - Never Owner, Contributor, User Access Administrator, a subscription or
   management-group scope, or any Entra directory role.
 - Review the assignment when you rotate the secret. Remove it when the proxy is

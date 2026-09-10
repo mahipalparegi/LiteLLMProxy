@@ -196,6 +196,37 @@ def test_every_model_is_an_azure_openai_deployment_on_one_endpoint() -> None:
         assert params["api_base"] == "os.environ/AZURE_OPENAI_API_BASE"
 
 
+def test_public_alias_and_azure_deployment_name_are_identical() -> None:
+    """What a caller asks for is what Azure is asked for. gpt-6-astra reaches the
+    gpt-6-astra deployment and nothing else."""
+
+    for entry in models():
+        alias = entry["model_name"]
+        assert entry["litellm_params"]["model"] == f"azure/{alias}", alias
+
+
+def test_no_alias_is_declared_twice() -> None:
+    """Two entries sharing a model_name make LiteLLM load-balance between them, so
+    a caller could silently land on a different deployment."""
+
+    names = [entry["model_name"] for entry in models()]
+    assert len(names) == len(set(names))
+
+
+def test_config_has_no_mechanism_that_could_swap_the_model() -> None:
+    rendered = yaml.safe_dump(load_yaml("config.yaml"))
+    for forbidden in (
+        "model_group_alias",
+        "model_alias_map",
+        "azure/*",
+        "openai/*",
+        "wildcard",
+        "routing_strategy",
+        "model_group_retry_policy",
+    ):
+        assert forbidden not in rendered, forbidden
+
+
 def test_config_pins_no_api_version_so_the_image_default_applies() -> None:
     """LiteLLM v1.99.0 defaults to 2025-02-01-preview; AZURE_API_VERSION overrides."""
 

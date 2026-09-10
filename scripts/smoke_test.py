@@ -11,7 +11,7 @@ Checks, in order:
   1. GET  /health/liveliness            (unauthenticated)
   2. GET  /health/readiness             (unauthenticated, db must be connected)
   3. GET  /v1/models                    (every expected alias present)
-  4. POST /v1/chat/completions          (gpt-5.6, max 20 output tokens)
+  4. POST /v1/chat/completions          (gpt-5.6-sol, max 20 output tokens)
   5. An invalid model name is rejected
   6. The virtual key is denied on key management, model management, config and
      admin routes
@@ -60,7 +60,7 @@ except ImportError:  # run directly: python scripts/smoke_test.py
         try_http_request,
     )
 
-TEST_MODEL = "gpt-5.6"
+TEST_MODEL = "gpt-5.6-sol"
 MAX_OUTPUT_TOKENS = 20
 PROMPT = "Reply with the single word OK."
 
@@ -83,7 +83,7 @@ the customer key. Expect HTTP 403 with role=internal_user:
 
   curl -sS -o /dev/null -w '%{http_code}\\n' -X POST "$LITELLM_BASE_URL/model/new" \\
     -H "Authorization: Bearer $LITELLM_API_KEY" -H 'content-type: application/json' \\
-    -d '{"model_name":"authz-probe","litellm_params":{"model":"azure/gpt-5.6"}}'
+    -d '{"model_name":"authz-probe","litellm_params":{"model":"azure/gpt-5.6-sol"}}'
 
 This script does not send it automatically: a valid body would create a model if
 the script were ever run with an admin key by mistake.

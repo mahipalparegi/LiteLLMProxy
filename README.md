@@ -29,7 +29,7 @@ operator scripts.
 <table>
 <tr><th align="left">Aliases</th><th align="left">Route</th><th align="left">Endpoint</th><th align="left">Customer&nbsp;access</th></tr>
 <tr>
-<td><code>gpt-5.5</code><br><code>gpt-5.6</code><br><code>gpt-5.6-terra</code><br><code>gpt-5.6-luna</code></td>
+<td><code>gpt-5.5</code><br><code>gpt-5.6-sol</code><br><code>gpt-5.6-terra</code><br><code>gpt-5.6-luna</code></td>
 <td><code>azure/</code></td>
 <td><code>AZURE_OPENAI_API_BASE</code><br><sub>…openai.azure.com</sub></td>
 <td>🟢 <code>customer-models</code></td>
@@ -142,7 +142,7 @@ if you add providers.
 flowchart LR
     subgraph cfg["config.yaml · model_list"]
         M1["gpt-5.5<br/><sub>access_groups: customer-models</sub>"]
-        M2["gpt-5.6*<br/><sub>access_groups: customer-models</sub>"]
+        M2["gpt-5.6-*<br/><sub>access_groups: customer-models</sub>"]
         M3["anything-new<br/><sub>no access group</sub>"]
     end
     G(["customer-models"])
@@ -264,7 +264,24 @@ wait for approval → re-run step 2.
    secret manager, diary the expiry.
 3. Record the **tenant ID** and **client ID**.
 4. On the **Foundry resource** (resource scope, not subscription), assign
-   **Azure AI User** *or* **Cognitive Services User**.
+   **Cognitive Services OpenAI User**. That is the role Microsoft documents as
+   granting *"Make inference API calls with Microsoft Entra ID"*.
+
+```bash
+az role assignment create \
+  --assignee <client-id> \
+  --role "Cognitive Services OpenAI User" \
+  --scope "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.CognitiveServices/accounts/<resource>"
+```
+
+> [!WARNING]
+> **Creating the app registration is not enough.** Without this role assignment
+> the service principal still receives a valid Entra token, and Azure then
+> refuses the call itself: `401 Principal does not have access to
+> API/Operation`. Do not confuse it with a bad secret or a wrong endpoint.
+> `Cognitive Services Contributor` does **not** grant inference — Microsoft lists
+> it as explicitly unable to make Entra inference calls. Allow ~5 minutes for a
+> new assignment to propagate.
 
 > [!CAUTION]
 > Never Owner, Contributor, User Access Administrator, a subscription or
@@ -452,7 +469,7 @@ flowchart TB
         CAT(["customer-models catalogue<br/><sub>verified · priced · Azure-backed</sub>"])
     end
     subgraph L2["Layer 2 · what each customer bought (commercial)"]
-        A["acme-corp<br/><sub>gpt-5.6, gpt-5.6-luna<br/>$1,000 / 30d</sub>"]
+        A["acme-corp<br/><sub>gpt-5.6-sol, gpt-5.6-luna<br/>$1,000 / 30d</sub>"]
         B["globex<br/><sub>gpt-5.5<br/>$500 / 30d</sub>"]
         C["initech-premium<br/><sub>all 4 models<br/>$4,000 / 30d</sub>"]
     end
@@ -478,7 +495,7 @@ Copy `customer-profiles.example.json` and edit it. Real profiles are git-ignored
 [
   {
     "key_alias": "acme-corp",
-    "models": ["gpt-5.6", "gpt-5.6-luna"],
+    "models": ["gpt-5.6-sol", "gpt-5.6-luna"],
     "max_budget": 1000,
     "budget_duration": "30d",
     "rpm_limit": 300,
@@ -530,7 +547,7 @@ created: initech-premium  <key ending Kf2Q>
 Preview it first with `--dry-run` (no network calls, no keys):
 
 ```
-acme-corp: $1000/30d models=['gpt-5.6', 'gpt-5.6-luna'] rpm=300 tpm=1000000 parallel=15
+acme-corp: $1000/30d models=['gpt-5.6-sol', 'gpt-5.6-luna'] rpm=300 tpm=1000000 parallel=15
 globex:    $500/30d  models=['gpt-5.5']                 rpm=120 tpm=400000  parallel=8
 ```
 
@@ -541,7 +558,7 @@ catalogue, telling you which customer requested what:
 error: Refusing to issue keys. These profiles request models that are not in the
 'customer-models' catalogue:
   acme-corp -> gpt-6-astra
-Eligible models: gpt-5.5, gpt-5.6, gpt-5.6-luna, gpt-5.6-terra
+Eligible models: gpt-5.5, gpt-5.6-luna, gpt-5.6-sol, gpt-5.6-terra
 ```
 
 <details>
@@ -582,17 +599,21 @@ Measured against a live proxy, not inferred:
 | :-- | :-- |
 | `/health/readiness` after cold start | `200` — `{"status":"healthy","db":"connected"}` in ~45 s, 83 tables created by the startup migration |
 | `AZURE_OPENAI_API_BASE` set to the portal's `…/openai/v1` | `render_start: ok: AZURE_OPENAI_API_BASE normalised to the resource endpoint` |
-| master key → `GET /model/info` | `gpt-5.5`, `gpt-5.6`, `gpt-5.6-terra`, `gpt-5.6-luna` → `["customer-models"]`; `gpt-6-astra` → `["admin-preview"]` |
-| `acme-corp` key → `GET /v1/models` | 2 models: `gpt-5.6`, `gpt-5.6-luna` |
+| master key → `GET /model/info` | `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` → `["customer-models"]`; `gpt-6-astra` → `["admin-preview"]` |
+| every alias → its own Azure deployment | 5 distinct aliases, 5 entries, each resolving to `azure/<same name>`. Asked for `gpt-6-astra`, routed `Received Model Group=gpt-6-astra`, `Available Model Group Fallbacks=None` |
+| an unconfigured alias (`gpt-5.6`) | `400 Invalid model name passed in model=gpt-5.6` — refused, never substituted |
+| `acme-corp` key → `GET /v1/models` | 2 models: `gpt-5.6-sol`, `gpt-5.6-luna` |
 | `globex` key → `GET /v1/models` | 1 model: `gpt-5.5` |
-| `acme-corp` key → `POST /v1/chat/completions` for `gpt-5.5` | `403 key_model_access_denied` — *key not allowed to access model. This key can only access models=['gpt-5.6', 'gpt-5.6-luna']. Tried to access gpt-5.5* |
-| `globex` key → `gpt-5.6` | `403 key_model_access_denied` — *…can only access models=['gpt-5.5']. Tried to access gpt-5.6* |
+| `acme-corp` key → `POST /v1/chat/completions` for `gpt-5.5` | `403 key_model_access_denied` — *key not allowed to access model. This key can only access models=['gpt-5.6-sol', 'gpt-5.6-luna']. Tried to access gpt-5.5* |
+| `globex` key → `gpt-5.6-sol` | `403 key_model_access_denied` — *…can only access models=['gpt-5.5']. Tried to access gpt-5.6-sol* |
 | any customer key → `gpt-6-astra` | `403 key_model_access_denied` |
 | key with spend $5.00 vs `max_budget` $1.00 | **`429 budget_exceeded`** — *Budget has been exceeded! Key=tiny-budget Current cost: 5.0, Max budget: 1.0* |
 
 Reproduced against the built image on real Postgres 16 and Redis 7. The `403` and
 `429` paths need no Azure credentials — the proxy refuses before it would call a
-provider, which is the property that matters.
+provider, which is the property that matters. Alias names in this table follow the
+current `config.yaml`; the transcript was captured before the `gpt-5.6-sol`
+rename, and the behaviour is alias-independent.
 
 That `429` is the hard stop. Tell customers to treat it as "quota exhausted until
 the window resets", distinct from a `429` caused by RPM/TPM, which clears in
@@ -653,7 +674,7 @@ The proxy speaks the OpenAI API, so any OpenAI SDK works by changing two values:
 ```bash
 curl -sS $URL/v1/chat/completions \
   -H "Authorization: Bearer $CUSTOMER_KEY" -H "content-type: application/json" \
-  -d '{"model":"gpt-5.6",
+  -d '{"model":"gpt-5.6-sol",
        "messages":[{"role":"user","content":"Summarise this in one line."}],
        "max_tokens":256}'
 ```
@@ -663,7 +684,7 @@ from openai import OpenAI
 
 client = OpenAI(base_url=f"{URL}/v1", api_key=CUSTOMER_KEY)
 print(client.chat.completions.create(
-    model="gpt-5.6",
+    model="gpt-5.6-sol",
     messages=[{"role": "user", "content": "Reply with OK."}],
     max_tokens=16,
 ).choices[0].message.content)
@@ -671,7 +692,7 @@ print(client.chat.completions.create(
 
 ```bash
 # Switching models on one key — only the model field changes
-for M in gpt-5.5 gpt-5.6 gpt-5.6-terra gpt-5.6-luna; do
+for M in gpt-5.5 gpt-5.6-sol gpt-5.6-terra gpt-5.6-luna; do
   curl -sS $URL/v1/chat/completions \
     -H "Authorization: Bearer $CUSTOMER_KEY" -H "content-type: application/json" \
     -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK.\"}],\"max_tokens\":16}"

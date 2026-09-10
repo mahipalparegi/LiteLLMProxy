@@ -25,9 +25,9 @@ model_list:
       mode: chat
       access_groups: ["customer-models"]
 
-  - model_name: gpt-5.6
+  - model_name: gpt-5.6-sol
     litellm_params:
-      model: azure/gpt-5.6
+      model: azure/gpt-5.6-sol
       api_base: os.environ/AZURE_OPENAI_API_BASE
       tenant_id: os.environ/AZURE_TENANT_ID
       client_id: os.environ/AZURE_CLIENT_ID
