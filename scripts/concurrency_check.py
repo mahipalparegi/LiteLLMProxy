@@ -9,23 +9,18 @@ Reads:
 
 Two modes:
 
-  default (free)   Fires --concurrency simultaneous GET /v1/models requests with
-                   the virtual key. This exercises TLS, the event loop, key
-                   authentication and model-access resolution against Postgres.
-                   It sends nothing to Azure and costs nothing.
-                   It proves gateway capacity. It does NOT prove the key's
+  default (free)   N simultaneous GET /v1/models. Exercises TLS, key auth and
+                   model-access resolution, sends nothing to Azure, costs nothing.
+                   Proves gateway capacity, NOT that the key's
                    max_parallel_requests allows N concurrent generations.
 
-  --generate       Fires --concurrency simultaneous POST /v1/chat/completions
-                   requests. Billable. This is the mode that proves a real
-                   caller can run N generations at once, because it is subject
-                   to the key's max_parallel_requests, rpm_limit and tpm_limit
-                   and to your Foundry quota. Requires --i-understand-this-spends-money
-                   and never runs when CI or GITHUB_ACTIONS is set.
+  --generate       N simultaneous POST /v1/chat/completions. Billable, and the
+                   only mode subject to the key's max_parallel_requests, rpm_limit
+                   and tpm_limit and to your Foundry quota. Requires
+                   --i-understand-this-spends-money and never runs in CI.
 
-A 429 in --generate mode is not a proxy fault: it means the key's limits or the
-Foundry quota sit below the target. Raise the key limits, or the quota, or lower
-the target.
+A 429 in --generate mode is not a proxy fault: the key's limits or the Foundry
+quota sit below the target.
 """
 
 from __future__ import annotations

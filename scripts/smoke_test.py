@@ -64,10 +64,9 @@ TEST_MODEL = "gpt-5.6-sol"
 MAX_OUTPUT_TOKENS = 20
 PROMPT = "Reply with the single word OK."
 
-# Bodies cannot create or change anything even if a call were unexpectedly
-# authorised. On model-management routes LiteLLM validates the body before it
-# checks authorization, so an incomplete body returns 400/422 rather than 403;
-# that is reported as a warning, never as a pass. See MANUAL_AUTHZ_PROBE.
+# Bodies are inert even if a call were unexpectedly authorised. Model-management
+# routes validate the body before authorization, so 400/422 is reported as a
+# warning, never a pass. See MANUAL_AUTHZ_PROBE.
 FORBIDDEN_ROUTES: tuple[tuple[str, str, Any], ...] = (
     ("POST", "/key/generate", {}),
     ("GET", "/key/list", None),

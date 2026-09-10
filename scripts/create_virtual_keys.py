@@ -14,15 +14,9 @@ max parallel request limits. Two modes:
                     and their OWN budget. This is the usual production mode.
   flag mode         N identical keys, each granted the whole customer catalogue.
 
-Model access is two-layered. The "customer-models" access group is the catalogue
-of models approved for customer use at all; a profile then names the subset that
-customer bought. A model absent from the catalogue cannot be granted to anyone,
-and a model added to config.yaml later reaches no existing key automatically.
-
-Endpoint and field names verified against LiteLLM v1.99.0:
-  POST /key/generate  - models, key_alias, max_budget, budget_duration,
-                        rpm_limit, tpm_limit, max_parallel_requests
-  GET  /health/readiness, GET /v1/models, GET /model/info
+The customer-models access group is the catalogue of models approved for customer
+use at all; a profile names the subset that customer bought. Both layers deny by
+default.
 """
 
 from __future__ import annotations
@@ -90,9 +84,8 @@ Do this manually before issuing any customer key, then re-run with
   3. For every model in the customer-models group, confirm the underlying
      litellm model begins with 'azure/' (Azure OpenAI) and that its api_base is
      your own Azure OpenAI resource endpoint.
-  4. Remove any non-Azure model from the group before issuing keys. Anything in
-     the group is reachable by every customer key that holds it, and a non-Azure
-     provider also means a second bill outside your Azure invoice.
+  4. Remove any non-Azure model from the group before issuing keys: it would be
+     reachable by every key that holds the group, on a bill outside Azure.
 """.strip()
 
 

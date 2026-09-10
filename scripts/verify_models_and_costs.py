@@ -8,22 +8,16 @@ Reads:
   LITELLM_MASTER_KEY  proxy admin credential (never printed)
 
 A model may not join the customer-models access group until it passes here.
-Models outside that group are configured but unreachable by customer keys, which
-is where an unverified model belongs.
 
-Routes used (all documented for LiteLLM v1.99.0):
+Routes used:
   GET  /model/info                     configured models + mapped pricing
   POST /v1/chat/completions            smallest valid chat request
   GET  /spend/logs?request_id=<id>     recorded spend for one request
-  response header x-litellm-response-cost   calculated cost for one request
+  response header x-litellm-response-cost
 
-Model types are NOT assumed to share a route. Only models whose model_info.mode
-is chat or completion are exercised. Embedding, image, audio, rerank, batch,
-realtime, OCR and video models are skipped with a warning, because each uses a
-different endpoint that this script does not call.
-
-Every model must resolve to an azure/ deployment on your own resource. Run this
-after renaming the config aliases to your real Foundry deployment names.
+Only models whose model_info.mode is chat or completion are exercised; every other
+mode uses a different endpoint and is skipped with a warning. Run this after
+renaming the config aliases to your real Foundry deployment names.
 """
 
 from __future__ import annotations

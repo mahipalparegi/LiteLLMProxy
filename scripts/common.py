@@ -22,23 +22,22 @@ OPENAI_ALIASES: tuple[str, ...] = (
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
+    "gpt-6-astra",
 )
-# Configured but kept out of the customer group; see config.yaml for why.
-PREVIEW_ALIASES: tuple[str, ...] = ("gpt-6-astra",)
+# Empty by design: where a configured-but-unverified model waits, held out of the
+# customer group by PREVIEW_ACCESS_GROUP.
+PREVIEW_ALIASES: tuple[str, ...] = ()
 
-# Customer-visible aliases.
 PROXY_ALIASES: tuple[str, ...] = OPENAI_ALIASES
 ALL_ALIASES: tuple[str, ...] = PROXY_ALIASES + PREVIEW_ALIASES
 
-# azure/ is Azure OpenAI. azure_ai/ stays accepted so a Foundry model outside the
-# OpenAI family can be added later without loosening the check.
+# azure_ai/ stays accepted so a non-OpenAI Foundry model needs no code change.
 AZURE_PREFIXES: tuple[str, ...] = ("azure_ai/", "azure/")
 
 CUSTOMER_ACCESS_GROUP = "customer-models"
 PREVIEW_ACCESS_GROUP = "admin-preview"
 
-# LiteLLM sentinel granting every model on the proxy. Deliberately unused on
-# customer keys.
+# LiteLLM sentinel for every model on the proxy. Unused on customer keys.
 ALL_PROXY_MODELS = "all-proxy-models"
 
 SECRET_ENV_NAMES: tuple[str, ...] = (
@@ -116,8 +115,8 @@ def base_url(explicit: str | None = None) -> str:
 def positive_number(value: Any, *, name: str, integer: bool = False) -> float | int:
     """Return value as a finite number greater than zero, or raise ValueError.
 
-    Rejects None, empty strings, booleans, non-numeric text, NaN, +/-inf, zero
-    and negatives. With integer=True, also rejects fractional values.
+    Rejects None, empty strings, booleans, non-numeric text, NaN, inf, zero and
+    negatives. With integer=True, also rejects fractions.
     """
 
     if value is None:
@@ -249,14 +248,14 @@ def is_azure_backed(model: str) -> bool:
 
 
 def token_limit_param(alias: str) -> str:
-    """Return the output-token parameter this model accepts.
+    """Return the output-token parameter to send for this model.
 
-    The GPT-5 reasoning line and GPT-6 take max_completion_tokens and reject
-    max_tokens. On LiteLLM v1.99.0 the classifier that rewrites this matches
-    gpt-5* only, so gpt-6* callers must send the right field themselves.
+    Every model here is a reasoning deployment that rejects max_tokens at the
+    provider, so scripts send what Azure accepts rather than relying on LiteLLM's
+    rewrite.
     """
 
-    return "max_completion_tokens" if alias.startswith("gpt-6") else "max_tokens"
+    return "max_completion_tokens"
 
 
 def missing_aliases(names: Iterable[str]) -> list[str]:

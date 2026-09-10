@@ -112,8 +112,7 @@ def test_start_script_requires_every_mandatory_variable() -> None:
 
 
 def test_start_script_requires_no_api_version_and_no_anthropic_endpoint() -> None:
-    """Both were removed: v1.99.0 defaults the api-version, and no Claude model
-    remains, so a second Foundry endpoint would be dead configuration."""
+    """The image defaults the api-version, and no Claude model remains."""
 
     script = read("scripts/render_start.sh")
     assert "AZURE_OPENAI_API_VERSION" not in script
@@ -187,27 +186,42 @@ def test_config_lists_every_alias_in_order() -> None:
     assert [entry["model_name"] for entry in models()] == list(ALL_ALIASES)
 
 
+GPT5_ROUTE = "gpt5_series/"
+
+
+def deployment_name(entry: dict) -> str:
+    """The Azure deployment an entry resolves to, minus provider and routing hint."""
+
+    model = entry["litellm_params"]["model"]
+    assert model.startswith("azure/"), model
+    return model[len("azure/"):].replace(GPT5_ROUTE, "")
+
+
 def test_every_model_is_an_azure_openai_deployment_on_one_endpoint() -> None:
     by_name = {entry["model_name"]: entry for entry in models()}
     assert set(by_name) == set(OPENAI_ALIASES + PREVIEW_ALIASES)
-    for alias in OPENAI_ALIASES + PREVIEW_ALIASES:
-        params = by_name[alias]["litellm_params"]
-        assert params["model"] == f"azure/{alias}"
-        assert params["api_base"] == "os.environ/AZURE_OPENAI_API_BASE"
+    for entry in models():
+        assert entry["litellm_params"]["api_base"] == "os.environ/AZURE_OPENAI_API_BASE"
 
 
 def test_public_alias_and_azure_deployment_name_are_identical() -> None:
-    """What a caller asks for is what Azure is asked for. gpt-6-astra reaches the
-    gpt-6-astra deployment and nothing else."""
+    """What a caller asks for is what Azure is asked for."""
 
     for entry in models():
-        alias = entry["model_name"]
-        assert entry["litellm_params"]["model"] == f"azure/{alias}", alias
+        assert deployment_name(entry) == entry["model_name"], entry["model_name"]
+
+
+def test_only_the_documented_routing_prefix_may_decorate_a_model_string() -> None:
+    """gpt5_series/ is the one allowed decoration, and only ever as a prefix."""
+
+    for entry in models():
+        remainder = entry["litellm_params"]["model"][len("azure/"):]
+        for suffix in (remainder.removeprefix(GPT5_ROUTE),):
+            assert "/" not in suffix, entry["model_name"]
 
 
 def test_no_alias_is_declared_twice() -> None:
-    """Two entries sharing a model_name make LiteLLM load-balance between them, so
-    a caller could silently land on a different deployment."""
+    """A duplicated model_name makes LiteLLM load-balance across deployments."""
 
     names = [entry["model_name"] for entry in models()]
     assert len(names) == len(set(names))
@@ -292,15 +306,24 @@ def test_access_group_is_the_customer_boundary() -> None:
         assert groups == [PREVIEW_ACCESS_GROUP]
 
 
-def test_gpt6_stays_quarantined_while_the_image_is_pinned_to_v1_99_0() -> None:
-    """v1.99.0 rewrites max_tokens for gpt-5* only, so a gpt-6 caller sending
-    max_tokens is rejected by the provider. Promote it after upgrading."""
+def test_gpt6_is_pinned_to_the_gpt5_reasoning_route() -> None:
+    """The rewrite gate is `"gpt-5" in model`, which gpt-6 fails. Drop the prefix
+    and every caller sending max_tokens gets a 400."""
 
-    dockerfile = read("Dockerfile")
-    config = read("config.yaml")
-    if "ARG LITELLM_VERSION=v1.99.0" in dockerfile:
-        assert "gpt-6-astra" in PREVIEW_ALIASES
-        assert "max_completion_tokens" in config or "QUARANTINED" in config
+    by_name = {entry["model_name"]: entry for entry in models()}
+    astra = by_name.get("gpt-6-astra")
+    if astra is None:
+        pytest.skip("gpt-6-astra is not configured")
+    if "ARG LITELLM_VERSION=v1.99.0" in read("Dockerfile"):
+        assert astra["litellm_params"]["model"] == "azure/gpt5_series/gpt-6-astra"
+
+
+def test_the_preview_group_is_never_also_a_customer_group() -> None:
+    """Whatever sits in admin-preview must not be sellable at the same time."""
+
+    for entry in models():
+        groups = entry["model_info"]["access_groups"]
+        assert not (PREVIEW_ACCESS_GROUP in groups and CUSTOMER_ACCESS_GROUP in groups)
 
 
 def test_model_list_entries_carry_no_extra_keys() -> None:
@@ -442,10 +465,7 @@ def test_more_than_one_worker_is_backed_by_shared_redis() -> None:
 
 
 def test_something_always_owns_the_schema_migration() -> None:
-    """Either startup migrates (schema update enabled), or a separate job does.
-
-    Never both disabled, and never two instances racing startup migrations.
-    """
+    """Startup or a job must migrate: never both disabled, never two racing."""
 
     web = service()
     variables = env_vars()

@@ -628,11 +628,11 @@ def test_profile_requires_a_non_empty_array(tmp_path: Path) -> None:
 
 
 def test_requested_models_must_be_in_the_approved_catalogue() -> None:
-    payloads = [{"key_alias": "acme", "models": ["gpt-5.5", "gpt-6-astra"]}]
+    payloads = [{"key_alias": "acme", "models": ["gpt-5.5", "this-model-is-not-configured"]}]
     with pytest.raises(common.ContractError) as error:
         create_virtual_keys.check_requested_models(payloads, {"gpt-5.5", "gpt-5.6-sol"})
     message = str(error.value)
-    assert "acme -> gpt-6-astra" in message
+    assert "acme -> this-model-is-not-configured" in message
     assert common.CUSTOMER_ACCESS_GROUP in message
 
 
@@ -694,7 +694,7 @@ def test_profile_mode_creates_one_key_per_customer(tmp_path: Path, capsys) -> No
 
 
 def test_profile_mode_refuses_a_model_outside_the_catalogue(tmp_path: Path, capsys) -> None:
-    path = _write(tmp_path, [_profile(models=["gpt-6-astra"])])
+    path = _write(tmp_path, [_profile(models=["this-model-is-not-configured"])])
     output = tmp_path / "generated-keys.json"
 
     with patch.dict(os.environ, {"LITELLM_MASTER_KEY": MASTER_KEY}, clear=False):
@@ -716,4 +716,4 @@ def test_profile_mode_refuses_a_model_outside_the_catalogue(tmp_path: Path, caps
     assert exit_code == 2
     request.assert_not_called()
     assert not output.exists()
-    assert "gpt-6-astra" in capsys.readouterr().err
+    assert "this-model-is-not-configured" in capsys.readouterr().err

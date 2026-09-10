@@ -44,10 +44,8 @@ case "${DATABASE_URL}" in
 esac
 log 'ok: DATABASE_URL is a PostgreSQL connection string'
 
-# The portal's "Azure OpenAI endpoint" field shows the v1 surface, ending
-# /openai/v1. The azure/ route builds /openai/deployments/... itself, so it needs
-# the resource root. Normalise rather than reject: the suffix and any trailing
-# slash are what the portal hands the operator, not operator error.
+# The portal shows the v1 surface (.../openai/v1) but the azure/ route builds
+# /openai/deployments/... itself, so normalise to the resource root.
 while :; do
     case "${AZURE_OPENAI_API_BASE}" in
         */) AZURE_OPENAI_API_BASE="${AZURE_OPENAI_API_BASE%/}" ;;
@@ -68,8 +66,7 @@ case "${AZURE_OPENAI_API_BASE}" in
 esac
 log 'ok: AZURE_OPENAI_API_BASE normalised to the resource endpoint'
 
-# api_version is deliberately not required: LiteLLM v1.99.0 defaults to
-# 2025-02-01-preview. Validate only if the operator overrides it.
+# Not required: the image defaults it. Validate only when overridden.
 if [ -n "${AZURE_API_VERSION-}" ]; then
     case "${AZURE_API_VERSION}" in
         ????-??-??|????-??-??-preview|preview|latest) ;;

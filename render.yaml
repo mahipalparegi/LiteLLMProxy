@@ -1,17 +1,12 @@
-# Render Blueprint. Fields validated against https://render.com/docs/blueprint-spec
-# Validate locally with: render blueprints validate render.yaml
+# Render Blueprint. Validate with: render blueprints validate render.yaml
 services:
   - type: web
     name: litellm-azure-proxy
     runtime: docker
-    # 4 workers x (1 vCPU + 4 GB), LiteLLM's documented per-worker floor. 4 GB is
-    # a floor, not a target: the Prisma query engine's resident memory is a
-    # high-water mark set by its largest-ever spend write, so an
-    # under-provisioned instance gets OOM-killed by one big write.
+    # 4 workers x (1 vCPU + 4 GB), LiteLLM's documented per-worker floor.
     plan: 4c-16g
     region: virginia
-    # One instance so the schema migration at startup has a single owner. Raise
-    # to 2+ only after the first deploy has created the schema; see README M.
+    # One instance so the startup schema migration has a single owner.
     numInstances: 1
     dockerContext: .
     dockerfilePath: ./Dockerfile
@@ -29,9 +24,7 @@ services:
         value: PRODUCTION
       - key: LITELLM_NUM_WORKERS
         value: "4"
-      # DISABLE_SCHEMA_UPDATE is deliberately unset: proxy startup applies
-      # migrations. Only set it once migrations move to a separate one-off job,
-      # which is a prerequisite for more than one instance.
+      # DISABLE_SCHEMA_UPDATE is deliberately unset: proxy startup migrates.
       - key: AZURE_SCOPE
         value: https://cognitiveservices.azure.com/.default
 
@@ -45,8 +38,7 @@ services:
           type: keyvalue
           property: connectionString
 
-      # Render prompts for sync:false values during initial Blueprint creation
-      # only. Later updates do not re-prompt; add new secrets by hand.
+      # Render prompts for sync:false values on initial Blueprint creation only.
       - key: LITELLM_MASTER_KEY
         sync: false
       - key: LITELLM_SALT_KEY
@@ -73,7 +65,6 @@ databases:
     databaseName: litellm
     user: litellm
     region: virginia
-    # LiteLLM's documented sizing row for up to 1K sustained RPS, and a 400
-    # connection ceiling against the 160 this deployment asks for.
+    # LiteLLM's sizing row for up to 1K sustained RPS; 400 connection ceiling.
     plan: 4c-16g
     postgresMajorVersion: "16"
