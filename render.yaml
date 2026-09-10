@@ -10,13 +10,12 @@ services:
     # under-provisioned instance gets OOM-killed by one big write.
     plan: 4c-16g
     region: virginia
-    numInstances: 2
+    # One instance so the schema migration at startup has a single owner. Raise
+    # to 2+ only after the first deploy has created the schema; see README M.
+    numInstances: 1
     dockerContext: .
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health/readiness
-    # Migrations run once per deploy, not once per instance. The inline override
-    # is required because the service sets DISABLE_SCHEMA_UPDATE=true.
-    preDeployCommand: DISABLE_SCHEMA_UPDATE=false litellm --config /app/config.yaml --skip_server_startup
     maxShutdownDelaySeconds: 120
     envVars:
       - key: PORT
@@ -30,8 +29,9 @@ services:
         value: PRODUCTION
       - key: LITELLM_NUM_WORKERS
         value: "4"
-      - key: DISABLE_SCHEMA_UPDATE
-        value: "true"
+      # DISABLE_SCHEMA_UPDATE is deliberately unset: proxy startup applies
+      # migrations. Only set it once migrations move to a separate one-off job,
+      # which is a prerequisite for more than one instance.
       - key: AZURE_SCOPE
         value: https://cognitiveservices.azure.com/.default
 

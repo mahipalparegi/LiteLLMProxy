@@ -309,8 +309,8 @@ flowchart LR
     A["push to GitHub"] --> B["New → Blueprint"]
     B --> C["review:<br/>web + Postgres + Key Value"]
     C --> D["enter 8 sync:false values"]
-    D --> E["pre-deploy runs<br/>migrations once"]
-    E --> F["instances start"]
+    D --> E["instance starts<br/>+ applies migrations"]
+    E --> F["4 workers ready"]
     F --> G{"/health/readiness<br/>200 · db connected"}
     G -->|yes| H["confirm /ui needs auth"]
     G -->|no| I["503 → check DATABASE_URL"]
@@ -334,10 +334,11 @@ flowchart LR
 render blueprints validate render.yaml   # optional, needs the Render CLI
 ```
 
-> [!IMPORTANT]
-> Verify on the first deploy that the **pre-deploy step ran**. Instances carry
-> `DISABLE_SCHEMA_UPDATE=true`, so migrations happen only in
-> `preDeployCommand`. If that step is skipped, the schema is never created.
+> [!NOTE]
+> Schema migrations run at **proxy startup**, because `DISABLE_SCHEMA_UPDATE` is
+> deliberately unset. That is why the service ships with `numInstances: 1` — two
+> instances would race on the same migration. Raise it after the first
+> successful deploy; see section M.
 
 ### Environment variables
 
@@ -360,7 +361,7 @@ render blueprints validate render.yaml   # optional, needs the Render CLI
 <tr><td><code>PORT</code></td><td><code>4000</code></td><td>bound by the start script</td></tr>
 <tr><td><code>LITELLM_NUM_WORKERS</code></td><td><code>4</code></td><td>one per vCPU</td></tr>
 <tr><td><code>STORE_MODEL_IN_DB</code></td><td><code>True</code></td><td>DB-backed keys + Admin-UI model management</td></tr>
-<tr><td><code>DISABLE_SCHEMA_UPDATE</code></td><td><code>true</code></td><td>instances must not race on migrations</td></tr>
+
 <tr><td><code>LITELLM_LOG</code></td><td><code>INFO</code></td><td>no verbose or debug logging</td></tr>
 <tr><td><code>LITELLM_MODE</code></td><td><code>PRODUCTION</code></td><td>disables <code>load_dotenv</code></td></tr>
 <tr><td><code>AZURE_SCOPE</code></td><td>documented default</td><td>not a secret</td></tr>
@@ -891,6 +892,27 @@ flowchart LR
 Raising `numInstances` also raises DB connections by `pool × workers`. Keep
 `pool × workers × instances` under the plan's connection ceiling — the test suite
 asserts this.
+
+### Going from 1 instance to 2+
+
+The schema migration currently runs at proxy startup, so a second instance would
+race it. Order of operations:
+
+1. Deploy with `numInstances: 1` and let it create the schema. Confirm
+   `/health/readiness` reports `"db": "connected"`.
+2. Raise `numInstances`. Steady-state deploys have no pending migrations, so the
+   startup migration is a no-op on every instance and the race is harmless.
+3. **On a LiteLLM version bump**, which is when migrations are actually pending,
+   drop back to 1 instance for that deploy, then scale up again. Or move
+   migrations to a dedicated one-off job and set `DISABLE_SCHEMA_UPDATE=true` on
+   the service.
+
+A `preDeployCommand` looks like the obvious home for step 3 and is what Render
+recommends for migrations generally, but on this Docker service it exited `128`
+before producing any output — most likely because the pre-deploy command is
+passed through the image `ENTRYPOINT`, which this repo overrides. If you want to
+pursue it, `sh -c '…'` is the first thing to try; until it is proven, the
+contract test refuses to let both migration paths be disabled at once.
 
 ---
 

@@ -371,21 +371,30 @@ def test_in_flight_requests_get_time_to_drain_on_redeploy() -> None:
     assert service()["maxShutdownDelaySeconds"] >= 60
 
 
-def test_more_than_one_instance_is_backed_by_shared_redis() -> None:
+def test_more_than_one_worker_is_backed_by_shared_redis() -> None:
     web = service()
     if web["numInstances"] > 1 or int(env_vars()["LITELLM_NUM_WORKERS"]["value"]) > 1:
         assert "REDIS_URL" in env_vars()
         assert "litellm-cache" in blueprint_services()
 
 
-def test_migrations_run_once_per_deploy_not_once_per_instance() -> None:
+def test_something_always_owns_the_schema_migration() -> None:
+    """Either startup migrates (schema update enabled), or a separate job does.
+
+    Never both disabled, and never two instances racing startup migrations.
+    """
+
     web = service()
     variables = env_vars()
-    if web["numInstances"] > 1:
-        assert variables["DISABLE_SCHEMA_UPDATE"]["value"] == "true"
-        # The pre-deploy step must override it, or nothing would ever migrate.
-        assert "DISABLE_SCHEMA_UPDATE=false" in web["preDeployCommand"]
-        assert "--skip_server_startup" in web["preDeployCommand"]
+    startup_migrates = "DISABLE_SCHEMA_UPDATE" not in variables
+    job_migrates = "--skip_server_startup" in web.get("preDeployCommand", "")
+
+    assert startup_migrates or job_migrates, "nothing would ever create the schema"
+    if startup_migrates and not job_migrates:
+        assert web["numInstances"] == 1, (
+            "multiple instances would race on startup migrations; move migrations "
+            "to a one-off job first"
+        )
 
 
 def test_non_secret_env_vars_have_the_required_values() -> None:
@@ -403,7 +412,6 @@ def test_env_vars_are_exactly_the_reviewed_set() -> None:
         "LITELLM_LOG",
         "LITELLM_MODE",
         "LITELLM_NUM_WORKERS",
-        "DISABLE_SCHEMA_UPDATE",
         "AZURE_SCOPE",
         "DATABASE_URL",
         "REDIS_URL",
