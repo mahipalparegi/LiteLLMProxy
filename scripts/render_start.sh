@@ -12,7 +12,7 @@ fail() {
     exit 1
 }
 
-REQUIRED='DATABASE_URL LITELLM_MASTER_KEY LITELLM_SALT_KEY AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_API_BASE AZURE_OPENAI_API_BASE AZURE_OPENAI_API_VERSION'
+REQUIRED='DATABASE_URL LITELLM_MASTER_KEY LITELLM_SALT_KEY AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_OPENAI_API_BASE'
 
 for name in ${REQUIRED}; do
     eval "current=\${${name}-}"
@@ -44,27 +44,39 @@ case "${DATABASE_URL}" in
 esac
 log 'ok: DATABASE_URL is a PostgreSQL connection string'
 
-# LiteLLM appends /v1/messages itself, so the Claude base must not carry it.
-case "${AZURE_API_BASE}" in
-    https://*.services.ai.azure.com/anthropic) ;;
-    *) fail 'AZURE_API_BASE must be exactly https://<resource>.services.ai.azure.com/anthropic (no /v1/messages suffix, no model name, no trailing slash)' ;;
-esac
-log 'ok: AZURE_API_BASE has the documented Foundry Anthropic shape'
+# The portal's "Azure OpenAI endpoint" field shows the v1 surface, ending
+# /openai/v1. The azure/ route builds /openai/deployments/... itself, so it needs
+# the resource root. Normalise rather than reject: the suffix and any trailing
+# slash are what the portal hands the operator, not operator error.
+while :; do
+    case "${AZURE_OPENAI_API_BASE}" in
+        */) AZURE_OPENAI_API_BASE="${AZURE_OPENAI_API_BASE%/}" ;;
+        */openai/v1) AZURE_OPENAI_API_BASE="${AZURE_OPENAI_API_BASE%/openai/v1}" ;;
+        */openai) AZURE_OPENAI_API_BASE="${AZURE_OPENAI_API_BASE%/openai}" ;;
+        *) break ;;
+    esac
+done
+export AZURE_OPENAI_API_BASE
 
-# Azure OpenAI is a different path on the resource, so a separate variable.
 case "${AZURE_OPENAI_API_BASE}" in
-    *' '*|*'?'*|*'/openai/deployments'*)
-        fail 'AZURE_OPENAI_API_BASE must be the resource endpoint only, with no /openai/deployments/... path and no query string' ;;
-    https://*.openai.azure.com/|https://*.openai.azure.com|https://*.services.ai.azure.com/|https://*.services.ai.azure.com) ;;
-    *) fail 'AZURE_OPENAI_API_BASE must be https://<resource>.openai.azure.com/ or https://<resource>.services.ai.azure.com/' ;;
+    *' '*|*'?'*|*'/deployments'*)
+        fail 'AZURE_OPENAI_API_BASE must be the resource endpoint only, with no /deployments/... path and no query string' ;;
+    */api/projects/*)
+        fail 'AZURE_OPENAI_API_BASE is the Foundry PROJECT endpoint. Azure OpenAI models need the resource endpoint instead: https://<resource>.openai.azure.com' ;;
+    https://*.openai.azure.com|https://*.services.ai.azure.com) ;;
+    *) fail 'AZURE_OPENAI_API_BASE must be https://<resource>.openai.azure.com - copy the portal Azure OpenAI endpoint; a /openai/v1 suffix is stripped for you' ;;
 esac
-log 'ok: AZURE_OPENAI_API_BASE has an Azure OpenAI resource shape'
+log 'ok: AZURE_OPENAI_API_BASE normalised to the resource endpoint'
 
-case "${AZURE_OPENAI_API_VERSION}" in
-    ????-??-??|????-??-??-preview) ;;
-    *) fail 'AZURE_OPENAI_API_VERSION must look like 2024-10-21 or 2024-10-21-preview; copy it from the deployment target URI' ;;
-esac
-log 'ok: AZURE_OPENAI_API_VERSION has an api-version shape'
+# api_version is deliberately not required: LiteLLM v1.99.0 defaults to
+# 2025-02-01-preview. Validate only if the operator overrides it.
+if [ -n "${AZURE_API_VERSION-}" ]; then
+    case "${AZURE_API_VERSION}" in
+        ????-??-??|????-??-??-preview|preview|latest) ;;
+        *) fail 'AZURE_API_VERSION must look like 2025-02-01 or 2025-02-01-preview' ;;
+    esac
+    log 'ok: AZURE_API_VERSION override has an api-version shape'
+fi
 
 # Optional for the operator, but config.yaml references it.
 if [ -z "${AZURE_SCOPE-}" ]; then

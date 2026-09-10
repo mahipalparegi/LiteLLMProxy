@@ -2,7 +2,7 @@
 
 # LiteLLM Proxy on Render
 
-**One metered, budget-enforced gateway in front of Claude *and* Azure OpenAI models in Microsoft Foundry.**
+**One metered, budget-enforced gateway in front of your Azure OpenAI deployments in Microsoft Foundry.**
 
 ![LiteLLM](https://img.shields.io/badge/LiteLLM-v1.99.0_pinned-4B32C3?style=for-the-badge)
 ![Render](https://img.shields.io/badge/Render-Blueprint-46E3B7?style=for-the-badge&logo=render&logoColor=white)
@@ -27,23 +27,14 @@ a startup contract script, `config.yaml`, a Render Blueprint, and stdlib-only
 operator scripts.
 
 <table>
-<tr><th align="left">Family</th><th align="left">Aliases</th><th align="left">Route</th><th align="left">Endpoint</th><th align="left">Customer&nbsp;access</th></tr>
+<tr><th align="left">Aliases</th><th align="left">Route</th><th align="left">Endpoint</th><th align="left">Customer&nbsp;access</th></tr>
 <tr>
-<td><b>Claude</b></td>
-<td><code>claude-fable-5</code><br><code>claude-opus-5</code><br><code>claude-sonnet-5</code><br><code>claude-haiku-4-5</code></td>
-<td><code>azure_ai/</code></td>
-<td><code>AZURE_API_BASE</code><br><sub>…services.ai.azure.com/anthropic</sub></td>
-<td>🟢 <code>customer-models</code></td>
-</tr>
-<tr>
-<td><b>Azure OpenAI</b></td>
 <td><code>gpt-5.5</code><br><code>gpt-5.6</code><br><code>gpt-5.6-terra</code><br><code>gpt-5.6-luna</code></td>
 <td><code>azure/</code></td>
-<td><code>AZURE_OPENAI_API_BASE</code><br><sub>…openai.azure.com/</sub></td>
+<td><code>AZURE_OPENAI_API_BASE</code><br><sub>…openai.azure.com</sub></td>
 <td>🟢 <code>customer-models</code></td>
 </tr>
 <tr>
-<td><b>GPT-6 preview</b></td>
 <td><code>gpt-6-astra</code></td>
 <td><code>azure/</code></td>
 <td><code>AZURE_OPENAI_API_BASE</code></td>
@@ -51,9 +42,14 @@ operator scripts.
 </tr>
 </table>
 
-All three run on **one Foundry resource**, through **one Entra service
+Every model runs on **one Foundry resource**, through **one Entra service
 principal**, onto **one Azure invoice**. Customers see one URL, one key, and a
 model list.
+
+> [!NOTE]
+> **No `api_version` is pinned.** LiteLLM v1.99.0 defaults Azure OpenAI calls to
+> `2025-02-01-preview`. Set the documented `AZURE_API_VERSION` env var only if you
+> need a different one — there is no `AZURE_OPENAI_API_VERSION` variable here.
 
 > [!WARNING]
 > **`gpt-6-astra` is configured but quarantined on v1.99.0.** LiteLLM's GPT-5
@@ -86,7 +82,7 @@ flowchart LR
     subgraph render["Render · virginia"]
         direction TB
         LB{{"HTTPS<br/>load balancer"}}
-        subgraph proxy["litellm-azure-proxy · 2 instances × 4 workers"]
+        subgraph proxy["litellm-azure-proxy · 1 instance × 4 workers"]
             W["LiteLLM Proxy v1.99.0<br/><sub>auth · budgets · RPM/TPM · spend</sub>"]
         end
         PG[("litellm-postgres<br/><sub>keys · budgets · spend logs</sub>")]
@@ -96,8 +92,7 @@ flowchart LR
     subgraph azure["Microsoft Azure"]
         ENTRA["Entra ID<br/>service principal<br/><sub>OAuth2 client credentials</sub>"]
         subgraph foundry["Azure AI Foundry resource"]
-            ANT["/anthropic<br/><sub>Claude deployments</sub>"]
-            OAI["/openai<br/><sub>GPT deployments</sub>"]
+            OAI["/openai/deployments/…<br/><sub>your GPT deployments</sub>"]
         end
     end
 
@@ -106,8 +101,7 @@ flowchart LR
     W <--> RD
     W -->|"token request"| ENTRA
     ENTRA -.->|"bearer token"| W
-    W ==>|"azure_ai/"| ANT
-    W ==>|"azure/"| OAI
+    W ==>|"azure/ · AZURE_OPENAI_API_BASE"| OAI
 
     style clients fill:#eef6ff,stroke:#4a90d9
     style render fill:#eafaf4,stroke:#46e3b7
@@ -147,7 +141,7 @@ if you add providers.
 ```mermaid
 flowchart LR
     subgraph cfg["config.yaml · model_list"]
-        M1["claude-*<br/><sub>access_groups: customer-models</sub>"]
+        M1["gpt-5.5<br/><sub>access_groups: customer-models</sub>"]
         M2["gpt-5.6*<br/><sub>access_groups: customer-models</sub>"]
         M3["anything-new<br/><sub>no access group</sub>"]
     end
@@ -180,7 +174,7 @@ Customer keys are issued with `models: ["customer-models"]`, **never
 > grants **every** model on the proxy, from **any** provider, forever. It is
 > deliberately unused on customer keys here. `scripts/create_virtual_keys.py`
 > refuses to run if no model carries the `customer-models` group, and refuses if
-> anything in the group is not `azure_ai/` or `azure/`.
+> anything in the group is not Azure-backed (`azure/`).
 
 ---
 
@@ -189,21 +183,34 @@ Customer keys are issued with `models: ["customer-models"]`, **never
 <details>
 <summary><b>1 · Deploy the models</b></summary>
 
-Deploy (or confirm) each Claude and GPT model you intend to expose. Record every
-**deployment name** exactly: the string after `azure_ai/` or `azure/` in
-`config.yaml` must match character for character.
+Deploy (or confirm) each GPT model you intend to expose, then list the real
+deployment names — the string after `azure/` in `config.yaml` must match
+character for character:
 
-Collect two endpoints from the portal — they are different paths on the same
-resource:
+```bash
+az cognitiveservices account deployment list \
+  -n <resource-name> -g <resource-group> -o table
+```
 
-| Variable | Shape |
-| :-- | :-- |
-| `AZURE_API_BASE` | `https://<resource>.services.ai.azure.com/anthropic` |
-| `AZURE_OPENAI_API_BASE` | `https://<resource>.openai.azure.com/` |
-| `AZURE_OPENAI_API_VERSION` | e.g. `2024-10-21`, from the deployment's target URI |
+Rename the aliases in `config.yaml` to match. Nothing else in the repo needs to
+change.
 
-`render_start.sh` rejects a base that carries `/v1/messages`,
-`/openai/deployments/...`, or a query string.
+**One endpoint, and it is not the one Foundry shows first.** The portal offers two
+values; only the Azure OpenAI one is used here.
+
+| Portal field | Example | Used? |
+| :-- | :-- | :-- |
+| Azure OpenAI endpoint | `https://<resource>.openai.azure.com/openai/v1` | ✅ → `AZURE_OPENAI_API_BASE` |
+| Project endpoint | `https://<resource>.services.ai.azure.com/api/projects/<project>` | ❌ not used |
+
+The project endpoint addresses the Foundry **projects/agents** API, not model
+inference. Pasting it here fails with a named error.
+
+> [!TIP]
+> Paste the Azure OpenAI endpoint exactly as the portal shows it.
+> `render_start.sh` strips the `/openai/v1` suffix and any trailing slash for you,
+> because the `azure/` route builds `/openai/deployments/<name>/…` itself. What it
+> rejects is a value carrying a deployment path or a query string.
 
 </details>
 
@@ -217,21 +224,15 @@ TOKEN="$(az account get-access-token \
   --resource https://cognitiveservices.azure.com \
   --query accessToken -o tsv)"
 
-# Claude
-curl -sS -X POST "https://<resource>.services.ai.azure.com/anthropic/v1/messages" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "anthropic-version: 2023-06-01" \
-  -H "content-type: application/json" \
-  -d '{"model":"claude-haiku-4-5","max_tokens":16,
-       "messages":[{"role":"user","content":"Reply with OK."}]}'
-
-# Azure OpenAI
 curl -sS -X POST \
-  "https://<resource>.openai.azure.com/openai/deployments/gpt-5.6-luna/chat/completions?api-version=<version>" \
+  "https://<resource>.openai.azure.com/openai/deployments/<deployment>/chat/completions?api-version=2025-02-01-preview" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "content-type: application/json" \
   -d '{"messages":[{"role":"user","content":"Reply with OK."}],"max_tokens":16}'
 ```
+
+This is the exact path LiteLLM builds from `AZURE_OPENAI_API_BASE`, so a `200`
+here means the proxy will work too.
 
 A `200` with content is proof. Anything else is not.
 
@@ -268,7 +269,7 @@ wait for approval → re-run step 2.
 > [!CAUTION]
 > Never Owner, Contributor, User Access Administrator, a subscription or
 > management-group scope, or any Entra directory role. The proxy only needs to
-> call inference. One principal serves both the Anthropic and OpenAI endpoints.
+> call inference.
 
 </details>
 
@@ -308,7 +309,7 @@ prefix.
 flowchart LR
     A["push to GitHub"] --> B["New → Blueprint"]
     B --> C["review:<br/>web + Postgres + Key Value"]
-    C --> D["enter 8 sync:false values"]
+    C --> D["enter 6 sync:false values"]
     D --> E["instance starts<br/>+ applies migrations"]
     E --> F["4 workers ready"]
     F --> G{"/health/readiness<br/>200 · db connected"}
@@ -346,13 +347,19 @@ render blueprints validate render.yaml   # optional, needs the Render CLI
 <tr><th align="left">Entered by hand · <code>sync: false</code></th><th align="left">Value</th></tr>
 <tr><td><code>LITELLM_MASTER_KEY</code></td><td><code>sk-…</code> run 1</td></tr>
 <tr><td><code>LITELLM_SALT_KEY</code></td><td><code>sk-…</code> run 2, different</td></tr>
-<tr><td><code>AZURE_API_BASE</code></td><td><code>https://&lt;resource&gt;.services.ai.azure.com/anthropic</code></td></tr>
-<tr><td><code>AZURE_OPENAI_API_BASE</code></td><td><code>https://&lt;resource&gt;.openai.azure.com/</code></td></tr>
-<tr><td><code>AZURE_OPENAI_API_VERSION</code></td><td>from the deployment target URI</td></tr>
+<tr><td><code>AZURE_OPENAI_API_BASE</code></td><td><code>https://&lt;resource&gt;.openai.azure.com</code><br><sub>portal value with <code>/openai/v1</code> is accepted and normalised</sub></td></tr>
 <tr><td><code>AZURE_TENANT_ID</code></td><td>Entra directory (tenant) ID</td></tr>
 <tr><td><code>AZURE_CLIENT_ID</code></td><td>Entra application (client) ID</td></tr>
 <tr><td><code>AZURE_CLIENT_SECRET</code></td><td>Entra client secret</td></tr>
 </table>
+
+Six values, and **no Azure API key among them** — the proxy authenticates with the
+Entra service principal, so an `api-key` never exists on this deployment.
+
+> [!CAUTION]
+> Render does not delete a variable just because it left `render.yaml`. If an
+> earlier deploy of this service defined `AZURE_API_BASE` or
+> `AZURE_OPENAI_API_VERSION`, delete them by hand in the dashboard.
 
 <table>
 <tr><th align="left">Set by the Blueprint</th><th align="left">Value</th><th align="left">Why</th></tr>
@@ -391,31 +398,13 @@ flowchart TD
     style F fill:#dbeafe,stroke:#2563eb
 ```
 
-**Claude** (Foundry Anthropic endpoint):
-
-```yaml
-  - model_name: <public-alias>
-    litellm_params:
-      model: azure_ai/<exact-foundry-deployment-name>
-      api_base: os.environ/AZURE_API_BASE
-      tenant_id: os.environ/AZURE_TENANT_ID
-      client_id: os.environ/AZURE_CLIENT_ID
-      client_secret: os.environ/AZURE_CLIENT_SECRET
-      azure_scope: os.environ/AZURE_SCOPE
-    model_info:
-      mode: chat
-      access_groups: ["customer-models"]
-```
-
-**Azure OpenAI** — same credentials, different endpoint, and `api_version` is
-required:
+Every entry is the same seven lines. Copy one, change two:
 
 ```yaml
   - model_name: <public-alias>
     litellm_params:
       model: azure/<exact-foundry-deployment-name>
       api_base: os.environ/AZURE_OPENAI_API_BASE
-      api_version: os.environ/AZURE_OPENAI_API_VERSION
       tenant_id: os.environ/AZURE_TENANT_ID
       client_id: os.environ/AZURE_CLIENT_ID
       client_secret: os.environ/AZURE_CLIENT_SECRET
@@ -424,6 +413,9 @@ required:
       mode: chat
       access_groups: ["customer-models"]
 ```
+
+No `api_version` line: the image default (`2025-02-01-preview`) applies to every
+model, and `AZURE_API_VERSION` overrides all of them at once if you ever need it.
 
 Add the model first **without** the access group, verify it, then add the group.
 That is the whole reason the group exists.
@@ -437,8 +429,8 @@ That is the whole reason the group exists.
 > in `customer-models`; `create_virtual_keys.py` enforces that.
 
 **Different model types use different routes.** Chat models answer
-`/v1/chat/completions` and `/v1/messages`. Embedding, image, audio, rerank and
-batch models do not. Set `model_info.mode` accordingly;
+`/v1/chat/completions`. Embedding, image, audio, rerank and batch models do not.
+Set `model_info.mode` accordingly;
 `verify_models_and_costs.py` skips non-chat modes with a warning rather than
 guessing a route.
 
@@ -460,9 +452,9 @@ flowchart TB
         CAT(["customer-models catalogue<br/><sub>verified · priced · Azure-backed</sub>"])
     end
     subgraph L2["Layer 2 · what each customer bought (commercial)"]
-        A["acme-corp<br/><sub>claude-sonnet-5, claude-haiku-4-5<br/>$1,000 / 30d</sub>"]
-        B["globex<br/><sub>gpt-5.6, gpt-5.6-luna<br/>$500 / 30d</sub>"]
-        C["initech-premium<br/><sub>5 models<br/>$4,000 / 30d</sub>"]
+        A["acme-corp<br/><sub>gpt-5.6, gpt-5.6-luna<br/>$1,000 / 30d</sub>"]
+        B["globex<br/><sub>gpt-5.5<br/>$500 / 30d</sub>"]
+        C["initech-premium<br/><sub>all 4 models<br/>$4,000 / 30d</sub>"]
     end
     Q["gpt-6-astra<br/><sub>quarantined</sub>"]
     CAT --> A & B & C
@@ -486,7 +478,7 @@ Copy `customer-profiles.example.json` and edit it. Real profiles are git-ignored
 [
   {
     "key_alias": "acme-corp",
-    "models": ["claude-sonnet-5", "claude-haiku-4-5"],
+    "models": ["gpt-5.6", "gpt-5.6-luna"],
     "max_budget": 1000,
     "budget_duration": "30d",
     "rpm_limit": 300,
@@ -528,8 +520,8 @@ python scripts/create_virtual_keys.py \
 
 ```
 preflight: readiness ok, database connected
-preflight: /v1/models exposes 9 models, every expected alias present
-preflight: 8 model(s) in 'customer-models', all Azure-backed; 1 configured model(s) stay hidden
+preflight: /v1/models exposes 5 models, every expected alias present
+preflight: 4 model(s) in 'customer-models', all Azure-backed; 1 configured model(s) stay hidden
 created: acme-corp        <key ending V6jQ>
 created: globex           <key ending BqkQ>
 created: initech-premium  <key ending Kf2Q>
@@ -538,8 +530,8 @@ created: initech-premium  <key ending Kf2Q>
 Preview it first with `--dry-run` (no network calls, no keys):
 
 ```
-acme-corp: $1000/30d models=['claude-sonnet-5', 'claude-haiku-4-5'] rpm=300 tpm=1000000 parallel=15
-globex:    $500/30d  models=['gpt-5.6', 'gpt-5.6-luna']            rpm=120 tpm=400000  parallel=8
+acme-corp: $1000/30d models=['gpt-5.6', 'gpt-5.6-luna'] rpm=300 tpm=1000000 parallel=15
+globex:    $500/30d  models=['gpt-5.5']                 rpm=120 tpm=400000  parallel=8
 ```
 
 The script refuses to issue anything if a profile names a model outside the
@@ -549,7 +541,7 @@ catalogue, telling you which customer requested what:
 error: Refusing to issue keys. These profiles request models that are not in the
 'customer-models' catalogue:
   acme-corp -> gpt-6-astra
-Eligible models: claude-fable-5, claude-haiku-4-5, ...
+Eligible models: gpt-5.5, gpt-5.6, gpt-5.6-luna, gpt-5.6-terra
 ```
 
 <details>
@@ -588,12 +580,19 @@ Measured against a live proxy, not inferred:
 
 | Test | Result |
 | :-- | :-- |
-| `acme-corp` key → `GET /v1/models` | 2 models: `claude-haiku-4-5`, `claude-sonnet-5` |
-| `globex` key → `GET /v1/models` | 2 models: `gpt-5.6`, `gpt-5.6-luna` |
-| `acme-corp` key → `POST /v1/chat/completions` for `gpt-5.6` | `403` — *key not allowed to access model. This key can only access models=['claude-sonnet-5', 'claude-haiku-4-5']* |
-| `globex` key → `claude-sonnet-5` | `403`, same shape |
+| `/health/readiness` after cold start | `200` — `{"status":"healthy","db":"connected"}` in ~45 s, 83 tables created by the startup migration |
+| `AZURE_OPENAI_API_BASE` set to the portal's `…/openai/v1` | `render_start: ok: AZURE_OPENAI_API_BASE normalised to the resource endpoint` |
+| master key → `GET /model/info` | `gpt-5.5`, `gpt-5.6`, `gpt-5.6-terra`, `gpt-5.6-luna` → `["customer-models"]`; `gpt-6-astra` → `["admin-preview"]` |
+| `acme-corp` key → `GET /v1/models` | 2 models: `gpt-5.6`, `gpt-5.6-luna` |
+| `globex` key → `GET /v1/models` | 1 model: `gpt-5.5` |
+| `acme-corp` key → `POST /v1/chat/completions` for `gpt-5.5` | `403 key_model_access_denied` — *key not allowed to access model. This key can only access models=['gpt-5.6', 'gpt-5.6-luna']. Tried to access gpt-5.5* |
+| `globex` key → `gpt-5.6` | `403 key_model_access_denied` — *…can only access models=['gpt-5.5']. Tried to access gpt-5.6* |
 | any customer key → `gpt-6-astra` | `403 key_model_access_denied` |
-| key with spend $5.00 vs `max_budget` $1.00 | **`429 budget_exceeded`** — *Budget has been exceeded! Current cost: 5.0, Max budget: 1.0* |
+| key with spend $5.00 vs `max_budget` $1.00 | **`429 budget_exceeded`** — *Budget has been exceeded! Key=tiny-budget Current cost: 5.0, Max budget: 1.0* |
+
+Reproduced against the built image on real Postgres 16 and Redis 7. The `403` and
+`429` paths need no Azure credentials — the proxy refuses before it would call a
+provider, which is the property that matters.
 
 That `429` is the hard stop. Tell customers to treat it as "quota exhausted until
 the window resets", distinct from a `429` caused by RPM/TPM, which clears in
@@ -627,7 +626,7 @@ flowchart LR
     A["/health/readiness<br/>healthy + db connected"] --> B["/v1/models<br/>non-empty"]
     B --> C["every expected<br/>alias present"]
     C --> D["/model/info:<br/>customer-models non-empty"]
-    D --> E["every catalogue model<br/>azure_ai/ or azure/"]
+    D --> E["every catalogue model<br/>Azure-backed (azure/)"]
     E --> G["every requested model<br/>in the catalogue"]
     G --> F(["issue keys"])
     style F fill:#dcfce7,stroke:#16a34a
@@ -648,31 +647,31 @@ never anything about Azure.
 curl -sS $URL/v1/models -H "Authorization: Bearer $CUSTOMER_KEY"
 ```
 
-<table>
-<tr><th align="left">Route</th><th align="left">Format</th><th align="left">Works with</th></tr>
-<tr><td><code>/v1/chat/completions</code></td><td>OpenAI</td><td>every alias, both families</td></tr>
-<tr><td><code>/v1/messages</code></td><td>Anthropic</td><td>every alias, both families</td></tr>
-<tr><td><code>/anthropic/v1/messages</code></td><td>Anthropic passthrough</td><td>every alias</td></tr>
-</table>
+The proxy speaks the OpenAI API, so any OpenAI SDK works by changing two values:
+`base_url` to the proxy and `api_key` to the customer key.
 
 ```bash
-# OpenAI-compatible — same call shape for Claude and GPT
 curl -sS $URL/v1/chat/completions \
   -H "Authorization: Bearer $CUSTOMER_KEY" -H "content-type: application/json" \
-  -d '{"model":"claude-sonnet-5",
+  -d '{"model":"gpt-5.6",
        "messages":[{"role":"user","content":"Summarise this in one line."}],
        "max_tokens":256}'
+```
 
-# Anthropic Messages format
-curl -sS $URL/v1/messages \
-  -H "Authorization: Bearer $CUSTOMER_KEY" \
-  -H "anthropic-version: 2023-06-01" -H "content-type: application/json" \
-  -d '{"model":"claude-haiku-4-5","max_tokens":256,
-       "messages":[{"role":"user","content":"Reply with OK."}]}'
+```python
+from openai import OpenAI
 
-# Switching families on one key — only the model field changes
-for M in claude-haiku-4-5 claude-sonnet-5 claude-opus-5 claude-fable-5 \
-         gpt-5.5 gpt-5.6 gpt-5.6-terra gpt-5.6-luna; do
+client = OpenAI(base_url=f"{URL}/v1", api_key=CUSTOMER_KEY)
+print(client.chat.completions.create(
+    model="gpt-5.6",
+    messages=[{"role": "user", "content": "Reply with OK."}],
+    max_tokens=16,
+).choices[0].message.content)
+```
+
+```bash
+# Switching models on one key — only the model field changes
+for M in gpt-5.5 gpt-5.6 gpt-5.6-terra gpt-5.6-luna; do
   curl -sS $URL/v1/chat/completions \
     -H "Authorization: Bearer $CUSTOMER_KEY" -H "content-type: application/json" \
     -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK.\"}],\"max_tokens\":16}"
@@ -680,7 +679,7 @@ done
 ```
 
 Every request on a key counts against **that key's single budget**, whichever
-model or family it names.
+model it names.
 
 ---
 
@@ -717,7 +716,7 @@ flowchart TD
   maximum cost is held before the request reaches Azure, so concurrent requests
   cannot share the last dollar.
 - **An exhausted key is blocked on every model it holds.** The budget lives on
-  the key, not the model, so switching family changes nothing. Verified:
+  the key, not the model, so switching model changes nothing. Verified:
   `429` with `"type": "budget_exceeded"`.
 - **No fallbacks.** No `fallbacks`, `context_window_fallbacks`,
   `content_policy_fallbacks` or `budget_fallbacks`, and no model priced at zero.
@@ -755,7 +754,7 @@ null, missing or unknown cost is a failure.
 | ⚠️ | Rule |
 | :-- | :-- |
 | 🔴 | **Never expose a model with unknown or zero cost.** Zero isn't just mispriced — budget checks are skipped entirely, making it a free bypass for an exhausted key. |
-| 🔴 | Use **only official Microsoft/Azure pricing**. Not Anthropic's direct rates, not OpenAI's direct rates, not a blog post. |
+| 🔴 | Use **only official Microsoft/Azure pricing**. Not OpenAI's direct rates, not a blog post. |
 | 🟡 | Cached-input, standard input, batch and output rates are **different numbers**. Confirm each separately if your traffic uses caching or the Batch API. |
 | 🟢 | A model that fails here can stay configured — just keep it out of `customer-models`. |
 
@@ -789,9 +788,9 @@ flowchart LR
 ```
 
 All usage authenticates as **one** Entra service principal against **one**
-subscription, so Claude and GPT usage land on **one Azure invoice addressed to
-you**. LiteLLM meters per virtual key; that is your chargeback data. Customers
-receive nothing from Microsoft — **you must bill them**.
+subscription, so every model lands on **one Azure invoice addressed to you**.
+LiteLLM meters per virtual key; that is your chargeback data. Customers receive
+nothing from Microsoft — **you must bill them**.
 
 Reconcile LiteLLM spend against the Azure invoice regularly. They can diverge:
 mapped pricing may drift from your contract, and failed upstream requests, batch
@@ -837,17 +836,17 @@ no matter how large the Render plan is. Nothing in the infrastructure fixes that
 
 | Component | Plan | Capacity note |
 | :-- | :-- | :-- |
-| Web service | `4c-16g` × 2 instances | 8 workers total. LiteLLM documents 1 vCPU **and 4 GB per worker**; 4 GB is a floor, not a target — the Prisma query engine's resident memory is a high-water mark set by its largest-ever spend write, so an under-provisioned instance is OOM-killed by one big write. |
+| Web service | `4c-16g` × 1 instance | 4 workers. LiteLLM documents 1 vCPU **and 4 GB per worker**; 4 GB is a floor, not a target — the Prisma query engine's resident memory is a high-water mark set by its largest-ever spend write, so an under-provisioned instance is OOM-killed by one big write. |
 | Postgres | `4c-16g` | LiteLLM's documented row for up to **1K sustained RPS**; raises the connection ceiling to 400. |
 | Key Value | `1g`, private only | Shared rate-limit counters, budget reservations, cache invalidation, scheduled-job lock. |
-| DB pool | `20` per worker | 20 × 4 workers × 2 instances = **160** of 400. Connections fail before database CPU does. |
+| DB pool | `20` per worker | 20 × 4 workers × 1 instance = **80** of 400, leaving room to raise `numInstances`. Connections fail before database CPU does. |
 | `request_timeout` | `600` | Default 6000 s would pin a slot for over an hour. |
 | `maxShutdownDelaySeconds` | `120` | In-flight generations drain on redeploy instead of being SIGKILLed at 30 s. |
 
 > [!IMPORTANT]
 > **Redis is not optional above one worker.** Without it every worker keeps its
 > own rate-limit counters and budget reservations, so a key's effective limits
-> multiply by the worker count (8× here) and the hard budget stops being hard.
+> multiply by the worker count (4× here) and the hard budget stops being hard.
 > `render_start.sh` **refuses to start** with `LITELLM_NUM_WORKERS > 1` unless
 > `REDIS_URL` or `REDIS_HOST` is set. Setting the env var alone is not enough —
 > `config.yaml` must point at Redis too, which it does.
@@ -885,7 +884,7 @@ the key or the quota. Refuses `--generate` when `CI`/`GITHUB_ACTIONS` is set.
 flowchart LR
     A["1 · raise key limits<br/><sub>free, instant</sub>"] --> B["2 · raise Foundry quota<br/><sub>everything else is moot without it</sub>"]
     B --> C["3 · bigger plan<br/><sub>keep 1 vCPU + 4 GB per worker</sub>"]
-    C --> D["4 · more instances<br/><sub>Redis + pre-deploy already in place</sub>"]
+    C --> D["4 · more instances<br/><sub>Redis already in place; see below</sub>"]
     D --> E["5 · Redis spend buffer<br/><sub>above ~1000 RPS</sub>"]
 ```
 
@@ -931,9 +930,13 @@ contract test refuses to let both migration paths be disabled at once.
   Postgres connection count against `max_connections`, and Azure `429`s (usually
   quota, not the proxy).
 - **Overage is possible on in-flight generations** (section I).
-- **Two model families, one credential.** If you ever add a provider outside this
-  Azure resource, re-read section F — the access group is what keeps that
-  decision from silently reaching every customer.
+- **One resource, one credential.** If you ever add a provider outside this Azure
+  resource, re-read section F — the access group is what keeps that decision from
+  silently reaching every customer.
+- **Alias names must match your deployments.** The five in `config.yaml` are
+  placeholders. Until you reconcile them against
+  `az cognitiveservices account deployment list`, the proxy will start and enforce
+  budgets correctly but every model call returns a deployment-not-found error.
 
 ---
 
@@ -983,7 +986,7 @@ CI runs the same checks on every push and PR, plus a committed-secret scan and a
 git init
 git add .
 git status                       # confirm no .env and no generated-keys.json
-git commit -m "LiteLLM Proxy on Render fronting Claude and Azure OpenAI in Foundry"
+git commit -m "LiteLLM Proxy on Render fronting Azure OpenAI in Foundry"
 git branch -M main
 git remote add origin https://github.com/<owner>/<repo>.git
 git push -u origin main
@@ -992,30 +995,38 @@ git push -u origin main
 ## Known deviations from the original brief
 
 <details>
-<summary><b>Five documented deviations, with reasons</b></summary>
+<summary><b>Documented deviations, with reasons</b></summary>
 
 1. **Render plan names.** The brief asked for `plan: standard` and
    `plan: basic-1gb`. The current Blueprint spec documents compute **plan IDs**,
    so neither string is valid. Sized up for real concurrency: `4c-16g` web,
    `4c-16g` Postgres, `1g` Key Value.
 2. **`all-proxy-models` replaced by an access group.** The brief specified
-   `["all-proxy-models"]` on customer keys. That was safe only while every model
-   was Azure Anthropic. Adding a second family makes it a liability: any new
-   model becomes instantly customer-visible. Customer keys now hold
+   `["all-proxy-models"]` on customer keys, which makes any newly configured
+   model instantly customer-visible. Customer keys now hold
    `["customer-models"]` instead. Strictly more restrictive, same customer
    experience.
-3. **Some alias names are unverified defaults.** LiteLLM's Azure Anthropic page
-   names `claude-sonnet-5`, `claude-haiku-4-5` and `claude-opus-5` only.
-   `gpt-5.5` has documented Azure support and pricing since v1.83.14, so it is in
-   the customer group. `gpt-6-astra` is documented as needing a post-v1.99.0
-   release for parameter handling, so it ships **quarantined** in
-   `admin-preview`. Deployment names are yours to choose — rename them and let
+3. **Claude removed entirely.** The brief included Foundry Anthropic models, but
+   this Azure resource does not offer them, so `azure_ai/`, `AZURE_API_BASE` and
+   the `/v1/messages` route are gone rather than left as configuration that
+   cannot work. `AZURE_PREFIXES` still accepts `azure_ai/` so a future non-OpenAI
+   Foundry model needs no code change.
+4. **Alias names are placeholders.** `gpt-5.5` has documented Azure support and
+   pricing since v1.83.14. `gpt-6-astra` needs a post-v1.99.0 release for
+   parameter handling, so it ships **quarantined** in `admin-preview`. Deployment
+   names are operator-chosen — rename them and let
    `verify_models_and_costs.py` gate them.
-4. **Entrypoint override.** The upstream entrypoint runs the Prisma helper then
+5. **Entrypoint override.** The upstream entrypoint runs the Prisma helper then
    the CLI. It is replaced so the deployment contract is validated first.
-   Migrations moved to `preDeployCommand`, which runs once per deploy instead of
-   once per instance.
-5. **Non-root user.** The pinned `litellm-database` image defines no non-root
+   Migrations stay at proxy startup: `preDeployCommand` exited `128` with no
+   output on this service, most likely because it is passed through the
+   overridden `ENTRYPOINT`.
+6. **No `api_version` anywhere.** The brief carried an
+   `AZURE_OPENAI_API_VERSION` variable. LiteLLM v1.99.0 ships
+   `AZURE_DEFAULT_API_VERSION = 2025-02-01-preview`, verified inside the pinned
+   image, so the variable was removed and `AZURE_API_VERSION` remains as the
+   documented override.
+7. **Non-root user.** The pinned `litellm-database` image defines no non-root
    user, so no `USER` line is added; forcing an arbitrary UID breaks the startup
    migration. The non-root variant is a separate image (`litellm-non_root`) that
    does not bundle Prisma.

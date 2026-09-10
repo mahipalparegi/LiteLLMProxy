@@ -61,7 +61,7 @@ except ImportError:  # run directly: python scripts/concurrency_check.py
     )
 
 DEFAULT_CONCURRENCY = 20
-GENERATE_MODEL = "claude-haiku-4-5"
+GENERATE_MODEL = "gpt-5.6"
 GENERATE_MAX_TOKENS = 16
 CI_MARKERS = ("CI", "GITHUB_ACTIONS")
 

@@ -58,8 +58,8 @@ except ImportError:  # run directly: python scripts/test_limits.py
     )
 
 CONFIRMATION = "SPEND MONEY"
-PRIMARY_MODEL = "claude-haiku-4-5"
-SECONDARY_MODEL = "claude-sonnet-5"
+PRIMARY_MODEL = "gpt-5.6"
+SECONDARY_MODEL = "gpt-5.5"
 CI_MARKERS = ("CI", "GITHUB_ACTIONS", "BUILD_ID", "RENDER")
 
 FORBIDDEN_ROUTES: tuple[tuple[str, str, Any], ...] = (

@@ -51,11 +51,7 @@ services:
         sync: false
       - key: LITELLM_SALT_KEY
         sync: false
-      - key: AZURE_API_BASE
-        sync: false
       - key: AZURE_OPENAI_API_BASE
-        sync: false
-      - key: AZURE_OPENAI_API_VERSION
         sync: false
       - key: AZURE_TENANT_ID
         sync: false

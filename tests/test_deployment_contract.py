@@ -14,7 +14,6 @@ from scripts.common import (
     ALL_ALIASES,
     ALL_PROXY_MODELS,
     AZURE_PREFIXES,
-    CLAUDE_ALIASES,
     CUSTOMER_ACCESS_GROUP,
     OPENAI_ALIASES,
     PREVIEW_ACCESS_GROUP,
@@ -30,9 +29,7 @@ POSTGRES_CONNECTION_CAP = 400
 SECRET_ENV_KEYS = (
     "LITELLM_MASTER_KEY",
     "LITELLM_SALT_KEY",
-    "AZURE_API_BASE",
     "AZURE_OPENAI_API_BASE",
-    "AZURE_OPENAI_API_VERSION",
     "AZURE_TENANT_ID",
     "AZURE_CLIENT_ID",
     "AZURE_CLIENT_SECRET",
@@ -104,9 +101,7 @@ def test_start_script_requires_every_mandatory_variable() -> None:
         "DATABASE_URL",
         "LITELLM_MASTER_KEY",
         "LITELLM_SALT_KEY",
-        "AZURE_API_BASE",
         "AZURE_OPENAI_API_BASE",
-        "AZURE_OPENAI_API_VERSION",
         "AZURE_TENANT_ID",
         "AZURE_CLIENT_ID",
         "AZURE_CLIENT_SECRET",
@@ -116,11 +111,30 @@ def test_start_script_requires_every_mandatory_variable() -> None:
     assert "must be different values" in script
 
 
-def test_start_script_validates_both_azure_endpoints_separately() -> None:
+def test_start_script_requires_no_api_version_and_no_anthropic_endpoint() -> None:
+    """Both were removed: v1.99.0 defaults the api-version, and no Claude model
+    remains, so a second Foundry endpoint would be dead configuration."""
+
     script = read("scripts/render_start.sh")
-    assert "services.ai.azure.com/anthropic" in script
-    assert "openai.azure.com" in script
-    assert "/openai/deployments" in script
+    assert "AZURE_OPENAI_API_VERSION" not in script
+    assert "AZURE_API_BASE" not in script
+    assert "anthropic" not in script.lower()
+
+
+def test_start_script_normalises_the_portal_azure_openai_endpoint() -> None:
+    """The portal shows the v1 surface; the azure/ route needs the resource root."""
+
+    script = read("scripts/render_start.sh")
+    assert "%/openai/v1}" in script
+    assert "%/}" in script
+    assert "export AZURE_OPENAI_API_BASE" in script
+    assert "/api/projects/" in script
+
+
+def test_start_script_validates_an_api_version_override_when_present() -> None:
+    script = read("scripts/render_start.sh")
+    assert "AZURE_API_VERSION-" in script
+    assert "????-??-??" in script
 
 
 def test_start_script_treats_azure_scope_as_optional() -> None:
@@ -173,22 +187,43 @@ def test_config_lists_every_alias_in_order() -> None:
     assert [entry["model_name"] for entry in models()] == list(ALL_ALIASES)
 
 
-def test_claude_models_use_the_anthropic_endpoint() -> None:
+def test_every_model_is_an_azure_openai_deployment_on_one_endpoint() -> None:
     by_name = {entry["model_name"]: entry for entry in models()}
-    for alias in CLAUDE_ALIASES:
-        params = by_name[alias]["litellm_params"]
-        assert params["model"] == f"azure_ai/{alias}"
-        assert params["api_base"] == "os.environ/AZURE_API_BASE"
-        assert "api_version" not in params
-
-
-def test_azure_openai_models_use_their_own_endpoint_and_api_version() -> None:
-    by_name = {entry["model_name"]: entry for entry in models()}
+    assert set(by_name) == set(OPENAI_ALIASES + PREVIEW_ALIASES)
     for alias in OPENAI_ALIASES + PREVIEW_ALIASES:
         params = by_name[alias]["litellm_params"]
         assert params["model"] == f"azure/{alias}"
         assert params["api_base"] == "os.environ/AZURE_OPENAI_API_BASE"
-        assert params["api_version"] == "os.environ/AZURE_OPENAI_API_VERSION"
+
+
+def test_config_pins_no_api_version_so_the_image_default_applies() -> None:
+    """LiteLLM v1.99.0 defaults to 2025-02-01-preview; AZURE_API_VERSION overrides."""
+
+    rendered = yaml.safe_dump(load_yaml("config.yaml"))
+    assert "api_version" not in rendered
+    assert "2025-02-01-preview" in read("config.yaml")
+
+
+def test_no_claude_or_foundry_anthropic_reference_survives_anywhere() -> None:
+    """Azure did not offer Claude on this resource, so it was removed outright."""
+
+    for name in (
+        "config.yaml",
+        "render.yaml",
+        ".env.example",
+        "scripts/common.py",
+        "scripts/smoke_test.py",
+        "scripts/test_limits.py",
+        "scripts/concurrency_check.py",
+        "scripts/create_virtual_keys.py",
+        "scripts/verify_models_and_costs.py",
+        "scripts/render_start.sh",
+        "customer-profiles.example.json",
+        "SECURITY.md",
+    ):
+        text = read(name).lower()
+        assert "claude" not in text, name
+        assert "anthropic" not in text, name
 
 
 def test_every_model_is_azure_backed() -> None:
@@ -242,7 +277,7 @@ def test_model_list_entries_carry_no_extra_keys() -> None:
         assert set(entry) == {"model_name", "litellm_params", "model_info"}
         assert set(entry["model_info"]) == {"mode", "access_groups"}
         assert entry["model_info"]["mode"] == "chat"
-        expected = {
+        assert set(entry["litellm_params"]) == {
             "model",
             "api_base",
             "tenant_id",
@@ -250,9 +285,6 @@ def test_model_list_entries_carry_no_extra_keys() -> None:
             "client_secret",
             "azure_scope",
         }
-        if entry["model_name"] not in CLAUDE_ALIASES:
-            expected.add("api_version")
-        assert set(entry["litellm_params"]) == expected
 
 
 def test_general_settings_enforce_budgets_fail_closed() -> None:
@@ -493,9 +525,7 @@ def test_env_example_is_tracked_and_holds_placeholders_only() -> None:
         "REDIS_URL",
         "LITELLM_MASTER_KEY",
         "LITELLM_SALT_KEY",
-        "AZURE_API_BASE",
         "AZURE_OPENAI_API_BASE",
-        "AZURE_OPENAI_API_VERSION",
         "AZURE_TENANT_ID",
         "AZURE_CLIENT_ID",
         "AZURE_CLIENT_SECRET",
@@ -508,9 +538,9 @@ def test_env_example_is_tracked_and_holds_placeholders_only() -> None:
     for line in text.splitlines():
         if "sk-" in line and not line.strip().startswith("#"):
             assert "REPLACE" in line, line
-    assert "/v1/messages suffix" in text
-    assert "services.ai.azure.com/anthropic" in text
-    assert "/openai/deployments" in text
+    assert "AZURE_OPENAI_API_VERSION" not in text
+    assert "openai.azure.com" in text
+    assert "/openai/v1" in text
 
 
 def test_generated_keys_file_is_not_committed() -> None:

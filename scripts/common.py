@@ -17,12 +17,6 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Iterable
 
-CLAUDE_ALIASES: tuple[str, ...] = (
-    "claude-fable-5",
-    "claude-opus-5",
-    "claude-sonnet-5",
-    "claude-haiku-4-5",
-)
 OPENAI_ALIASES: tuple[str, ...] = (
     "gpt-5.5",
     "gpt-5.6",
@@ -33,10 +27,11 @@ OPENAI_ALIASES: tuple[str, ...] = (
 PREVIEW_ALIASES: tuple[str, ...] = ("gpt-6-astra",)
 
 # Customer-visible aliases.
-PROXY_ALIASES: tuple[str, ...] = CLAUDE_ALIASES + OPENAI_ALIASES
+PROXY_ALIASES: tuple[str, ...] = OPENAI_ALIASES
 ALL_ALIASES: tuple[str, ...] = PROXY_ALIASES + PREVIEW_ALIASES
 
-# azure_ai/ is the Foundry Anthropic endpoint, azure/ is Azure OpenAI.
+# azure/ is Azure OpenAI. azure_ai/ stays accepted so a Foundry model outside the
+# OpenAI family can be added later without loosening the check.
 AZURE_PREFIXES: tuple[str, ...] = ("azure_ai/", "azure/")
 
 CUSTOMER_ACCESS_GROUP = "customer-models"
@@ -45,8 +40,6 @@ PREVIEW_ACCESS_GROUP = "admin-preview"
 # LiteLLM sentinel granting every model on the proxy. Deliberately unused on
 # customer keys.
 ALL_PROXY_MODELS = "all-proxy-models"
-
-ANTHROPIC_VERSION = "2023-06-01"
 
 SECRET_ENV_NAMES: tuple[str, ...] = (
     "LITELLM_MASTER_KEY",

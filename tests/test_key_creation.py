@@ -414,18 +414,18 @@ def test_preflight_requires_a_non_empty_model_list() -> None:
     assert "no models" in str(error.value)
 
 
-def test_preflight_requires_all_four_aliases() -> None:
+def test_preflight_requires_every_customer_alias() -> None:
     def fake_http(method, url, **_kwargs):
         if url.endswith("/health/readiness"):
             return READY
         if url.endswith("/v1/models"):
-            return 200, {}, {"data": [{"id": "claude-sonnet-5"}]}
+            return 200, {}, {"data": [{"id": "gpt-5.6"}]}
         raise AssertionError("should not reach /model/info")
 
     with patch.object(create_virtual_keys, "http_request", side_effect=fake_http):
         with pytest.raises(common.ContractError) as error:
             create_virtual_keys.preflight("https://proxy.example.com", MASTER_KEY, timeout=5)
-    assert "claude-fable-5" in str(error.value)
+    assert "gpt-5.5" in str(error.value)
 
 
 def test_management_route_accepted_is_reported_as_a_failure() -> None:
@@ -535,7 +535,7 @@ def test_concurrency_check_fails_on_throttling(capsys) -> None:
 def _profile(**overrides) -> dict:
     base = {
         "key_alias": "acme-corp",
-        "models": ["claude-sonnet-5", "claude-haiku-4-5"],
+        "models": ["gpt-5.6", "gpt-5.6-luna"],
         "max_budget": 1000,
         "budget_duration": "30d",
         "rpm_limit": 300,
@@ -563,7 +563,7 @@ def test_profile_gives_a_customer_only_their_selected_models(tmp_path: Path) -> 
         tpm=profiles[0]["tpm_limit"],
         max_parallel=profiles[0]["max_parallel_requests"],
     )
-    assert payload["models"] == ["claude-sonnet-5", "claude-haiku-4-5"]
+    assert payload["models"] == ["gpt-5.6", "gpt-5.6-luna"]
     assert payload["max_budget"] == 1000
     assert common.CUSTOMER_ACCESS_GROUP not in payload["models"]
     assert common.ALL_PROXY_MODELS not in payload["models"]
@@ -604,7 +604,7 @@ def test_profile_rejects_a_misspelled_limit_instead_of_ignoring_it(tmp_path: Pat
         {"budget_duration": "1 month"},
         {"budget_duration": ""},
         {"models": []},
-        {"models": ["claude-sonnet-5", "claude-sonnet-5"]},
+        {"models": ["gpt-5.6", "gpt-5.6"]},
         {"models": [""]},
         {"key_alias": ""},
         {"key_alias": "a b"},
@@ -628,9 +628,9 @@ def test_profile_requires_a_non_empty_array(tmp_path: Path) -> None:
 
 
 def test_requested_models_must_be_in_the_approved_catalogue() -> None:
-    payloads = [{"key_alias": "acme", "models": ["claude-sonnet-5", "gpt-6-astra"]}]
+    payloads = [{"key_alias": "acme", "models": ["gpt-5.5", "gpt-6-astra"]}]
     with pytest.raises(common.ContractError) as error:
-        create_virtual_keys.check_requested_models(payloads, {"claude-sonnet-5", "gpt-5.6"})
+        create_virtual_keys.check_requested_models(payloads, {"gpt-5.5", "gpt-5.6"})
     message = str(error.value)
     assert "acme -> gpt-6-astra" in message
     assert common.CUSTOMER_ACCESS_GROUP in message
@@ -638,7 +638,7 @@ def test_requested_models_must_be_in_the_approved_catalogue() -> None:
 
 def test_requested_models_accept_the_catalogue_group_itself() -> None:
     payloads = [{"key_alias": "hooli", "models": [common.CUSTOMER_ACCESS_GROUP]}]
-    create_virtual_keys.check_requested_models(payloads, {"claude-sonnet-5"})
+    create_virtual_keys.check_requested_models(payloads, {"gpt-5.6"})
 
 
 def test_shipped_example_profiles_only_request_customer_catalogue_models() -> None:
@@ -689,7 +689,7 @@ def test_profile_mode_creates_one_key_per_customer(tmp_path: Path, capsys) -> No
     assert [item["key_alias"] for item in sent] == ["acme", "globex"]
     assert [item["max_budget"] for item in sent] == [1000.0, 500.0]
     saved = json.loads(output.read_text(encoding="utf-8"))
-    assert saved[0]["models"] == ["claude-sonnet-5", "claude-haiku-4-5"]
+    assert saved[0]["models"] == ["gpt-5.6", "gpt-5.6-luna"]
     assert MASTER_KEY not in capsys.readouterr().out
 
 
@@ -699,7 +699,7 @@ def test_profile_mode_refuses_a_model_outside_the_catalogue(tmp_path: Path, caps
 
     with patch.dict(os.environ, {"LITELLM_MASTER_KEY": MASTER_KEY}, clear=False):
         with patch.object(
-            create_virtual_keys, "preflight", return_value={"claude-sonnet-5"}
+            create_virtual_keys, "preflight", return_value={"gpt-5.6"}
         ):
             with patch.object(create_virtual_keys, "http_request") as request:
                 exit_code = create_virtual_keys.main(

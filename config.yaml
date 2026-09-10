@@ -1,66 +1,22 @@
-# LiteLLM Proxy v1.99.0 - Claude and Azure OpenAI in Microsoft Foundry.
-# Anthropic route:    https://docs.litellm.ai/docs/providers/azure/azure_anthropic
-# Azure OpenAI route: https://docs.litellm.ai/docs/providers/azure/
-# Access groups:      https://docs.litellm.ai/docs/proxy/model_access_groups
+# LiteLLM Proxy v1.99.0 - Azure OpenAI models in Microsoft Foundry.
+# Route: https://docs.litellm.ai/docs/providers/azure/
+# Access groups: https://docs.litellm.ai/docs/proxy/model_access_groups
 #
 # access_groups is the customer boundary. Keys hold ["customer-models"], so a
 # model outside that group is configured but unreachable by any customer key.
-# Verify a model (README F and J), then add it to the group.
+#
+# api_version is deliberately absent: LiteLLM v1.99.0 defaults to
+# 2025-02-01-preview. Set the documented AZURE_API_VERSION env var to override.
+#
+# RENAME THESE to match your Foundry deployment names exactly. Check yours with:
+#   az cognitiveservices account deployment list -n <resource> -g <rg> -o table
+# Then run scripts/verify_models_and_costs.py before issuing any customer key.
 
 model_list:
-  - model_name: claude-fable-5
-    litellm_params:
-      model: azure_ai/claude-fable-5
-      api_base: os.environ/AZURE_API_BASE
-      tenant_id: os.environ/AZURE_TENANT_ID
-      client_id: os.environ/AZURE_CLIENT_ID
-      client_secret: os.environ/AZURE_CLIENT_SECRET
-      azure_scope: os.environ/AZURE_SCOPE
-    model_info:
-      mode: chat
-      access_groups: ["customer-models"]
-
-  - model_name: claude-opus-5
-    litellm_params:
-      model: azure_ai/claude-opus-5
-      api_base: os.environ/AZURE_API_BASE
-      tenant_id: os.environ/AZURE_TENANT_ID
-      client_id: os.environ/AZURE_CLIENT_ID
-      client_secret: os.environ/AZURE_CLIENT_SECRET
-      azure_scope: os.environ/AZURE_SCOPE
-    model_info:
-      mode: chat
-      access_groups: ["customer-models"]
-
-  - model_name: claude-sonnet-5
-    litellm_params:
-      model: azure_ai/claude-sonnet-5
-      api_base: os.environ/AZURE_API_BASE
-      tenant_id: os.environ/AZURE_TENANT_ID
-      client_id: os.environ/AZURE_CLIENT_ID
-      client_secret: os.environ/AZURE_CLIENT_SECRET
-      azure_scope: os.environ/AZURE_SCOPE
-    model_info:
-      mode: chat
-      access_groups: ["customer-models"]
-
-  - model_name: claude-haiku-4-5
-    litellm_params:
-      model: azure_ai/claude-haiku-4-5
-      api_base: os.environ/AZURE_API_BASE
-      tenant_id: os.environ/AZURE_TENANT_ID
-      client_id: os.environ/AZURE_CLIENT_ID
-      client_secret: os.environ/AZURE_CLIENT_SECRET
-      azure_scope: os.environ/AZURE_SCOPE
-    model_info:
-      mode: chat
-      access_groups: ["customer-models"]
-
   - model_name: gpt-5.5
     litellm_params:
       model: azure/gpt-5.5
       api_base: os.environ/AZURE_OPENAI_API_BASE
-      api_version: os.environ/AZURE_OPENAI_API_VERSION
       tenant_id: os.environ/AZURE_TENANT_ID
       client_id: os.environ/AZURE_CLIENT_ID
       client_secret: os.environ/AZURE_CLIENT_SECRET
@@ -73,7 +29,6 @@ model_list:
     litellm_params:
       model: azure/gpt-5.6
       api_base: os.environ/AZURE_OPENAI_API_BASE
-      api_version: os.environ/AZURE_OPENAI_API_VERSION
       tenant_id: os.environ/AZURE_TENANT_ID
       client_id: os.environ/AZURE_CLIENT_ID
       client_secret: os.environ/AZURE_CLIENT_SECRET
@@ -86,7 +41,6 @@ model_list:
     litellm_params:
       model: azure/gpt-5.6-terra
       api_base: os.environ/AZURE_OPENAI_API_BASE
-      api_version: os.environ/AZURE_OPENAI_API_VERSION
       tenant_id: os.environ/AZURE_TENANT_ID
       client_id: os.environ/AZURE_CLIENT_ID
       client_secret: os.environ/AZURE_CLIENT_SECRET
@@ -99,7 +53,6 @@ model_list:
     litellm_params:
       model: azure/gpt-5.6-luna
       api_base: os.environ/AZURE_OPENAI_API_BASE
-      api_version: os.environ/AZURE_OPENAI_API_VERSION
       tenant_id: os.environ/AZURE_TENANT_ID
       client_id: os.environ/AZURE_CLIENT_ID
       client_secret: os.environ/AZURE_CLIENT_SECRET
@@ -112,15 +65,13 @@ model_list:
   # LiteLLM's GPT-5 reasoning classifier matches gpt-5* only, so on this version
   # a gpt-6-astra request keeps max_tokens and temperature as sent and the
   # provider rejects them. The widened classifier ships after v1.99.0. Callers
-  # must send max_completion_tokens and omit temperature until then; it takes
-  # reasoning_effort low|medium|high|xhigh. Cost tracking works now via
-  # POST /reload/model_cost_map. Promote it to customer-models only after
-  # bumping LITELLM_VERSION and re-running verify_models_and_costs.py.
+  # must send max_completion_tokens and omit temperature until then. Promote it
+  # to customer-models only after bumping LITELLM_VERSION and re-running
+  # scripts/verify_models_and_costs.py.
   - model_name: gpt-6-astra
     litellm_params:
       model: azure/gpt-6-astra
       api_base: os.environ/AZURE_OPENAI_API_BASE
-      api_version: os.environ/AZURE_OPENAI_API_VERSION
       tenant_id: os.environ/AZURE_TENANT_ID
       client_id: os.environ/AZURE_CLIENT_ID
       client_secret: os.environ/AZURE_CLIENT_SECRET
@@ -131,8 +82,7 @@ model_list:
 
   # PRICING (README J). No price is invented here. Override only from the
   # official Microsoft pricing page, and never with 0 - LiteLLM skips budget
-  # checks entirely for zero-cost models. Deployment names above are Foundry
-  # defaults, not promises; rename to match yours.
+  # checks entirely for zero-cost models.
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

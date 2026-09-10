@@ -88,8 +88,8 @@ Do this manually before issuing any customer key, then re-run with
   1. Open the Admin UI at <proxy-url>/ui and sign in as the proxy admin.
   2. Go to Models + Endpoints -> All Models.
   3. For every model in the customer-models group, confirm the underlying
-     litellm model begins with 'azure_ai/' (Foundry Anthropic) or 'azure/'
-     (Azure OpenAI), and that its api_base is your own Foundry resource.
+     litellm model begins with 'azure/' (Azure OpenAI) and that its api_base is
+     your own Azure OpenAI resource endpoint.
   4. Remove any non-Azure model from the group before issuing keys. Anything in
      the group is reachable by every customer key that holds it, and a non-Azure
      provider also means a second bill outside your Azure invoice.

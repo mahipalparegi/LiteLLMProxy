@@ -11,7 +11,7 @@ and the customer virtual keys it issues.
 | --- | --- | --- |
 | `LITELLM_MASTER_KEY` | Render env var, operator secret store | Full proxy admin: create/read/modify keys, add models, change config, read all spend |
 | `LITELLM_SALT_KEY` | Render env var | Provider credentials stored in the database can be decrypted |
-| `AZURE_CLIENT_SECRET` (+ tenant/client id) | Render env var | Direct, unmetered calls to your Foundry resource — **both** the Anthropic and Azure OpenAI endpoints — billed to you |
+| `AZURE_CLIENT_SECRET` (+ tenant/client id) | Render env var | Direct, unmetered calls to your Azure OpenAI deployments, billed to you |
 | `DATABASE_URL` | Render-managed, injected from the Postgres instance | Every key hash, budget, spend row and stored credential |
 | `REDIS_URL` | Render-managed, injected from the Key Value instance | Live rate-limit counters and budget reservations; tampering weakens enforcement |
 | Customer virtual keys | Operator secret store, then the customer | Model access within that key's budget, RPM, TPM and parallelism |
@@ -27,8 +27,8 @@ Threats this deployment is designed against:
    management, model management, config or admin routes. Verified by
    `scripts/smoke_test.py`.
 2. **A customer reaching Azure directly.** Customers never receive Azure
-   credentials, the tenant id, the client id or either resource endpoint. The
-   proxy is the only path to both the Anthropic and Azure OpenAI endpoints.
+   credentials, the tenant id, the client id or the resource endpoint. The proxy
+   is the only path to the Azure OpenAI deployments.
 3. **A customer exceeding what they paid for.** Per-key USD budget, RPM, TPM and
    max parallel requests, enforced fail-closed against the database.
 4. **One customer affecting another.** Keys are standalone (no shared team), so
@@ -40,8 +40,8 @@ Threats this deployment is designed against:
    vendored; upgrades are deliberate.
 7. **Silent budget bypass.** No fallbacks, no zero-priced models, no reroute of a
    refused request.
-8. **Per-worker limit multiplication.** With 8 worker processes, unshared
-   counters would multiply every key's RPM, TPM and budget by 8. Redis holds that
+8. **Per-worker limit multiplication.** With 4 worker processes, unshared
+   counters would multiply every key's RPM, TPM and budget by 4. Redis holds that
    state, and `render_start.sh` refuses to start more than one worker without it.
 
 Explicitly **not** covered:
@@ -67,7 +67,7 @@ Explicitly **not** covered:
   cannot be granted to anyone, and a model added to the group does not reach any
   existing key whose profile did not name it.
 - Enforcement is per request, verified: a key holding
-  `["claude-sonnet-5","claude-haiku-4-5"]` calling `gpt-5.6` receives `403
+  `["gpt-5.6","gpt-5.6-luna"]` calling `gpt-5.5` receives `403
   key not allowed to access model`, naming only the models it does hold.
 - `scripts/create_virtual_keys.py` rejects a profile that requests a model
   outside the catalogue, and rejects unknown profile fields outright so a
@@ -76,7 +76,7 @@ Explicitly **not** covered:
   the proxy, from **any** provider, including ones added later. It is
   deliberately unused on customer keys. Do not reintroduce it.
 - `scripts/create_virtual_keys.py` refuses to issue keys if no model carries the
-  group, and refuses if anything in the group is not `azure_ai/` or `azure/` —
+  group, and refuses if anything in the group is not Azure-backed (`azure/`) —
   because a non-Azure model in the group means customer traffic on a provider
   billed outside your Azure invoice.
 - Adding a model to the group is the privileged act. Verify entitlement, quota, a

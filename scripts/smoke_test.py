@@ -11,13 +11,12 @@ Checks, in order:
   1. GET  /health/liveliness            (unauthenticated)
   2. GET  /health/readiness             (unauthenticated, db must be connected)
   3. GET  /v1/models                    (every expected alias present)
-  4. POST /v1/chat/completions          (claude-haiku-4-5, max 20 output tokens)
-  5. POST /v1/messages                  (Anthropic format, max 20 output tokens)
-  6. An invalid model name is rejected
-  7. The virtual key is denied on key management, model management, config and
+  4. POST /v1/chat/completions          (gpt-5.6, max 20 output tokens)
+  5. An invalid model name is rejected
+  6. The virtual key is denied on key management, model management, config and
      admin routes
 
-Steps 4 and 5 each cost a few tokens. Use --skip-generation to omit them.
+Step 4 costs a few tokens. Use --skip-generation to omit it.
 No load, budget or rate-limit testing happens here; that is test_limits.py,
 which is manual by design.
 """
@@ -30,7 +29,6 @@ from typing import Any
 
 try:
     from scripts.common import (
-        ANTHROPIC_VERSION,
         PROXY_ALIASES,
         ContractError,
         HttpError,
@@ -47,7 +45,6 @@ try:
     )
 except ImportError:  # run directly: python scripts/smoke_test.py
     from common import (  # type: ignore[no-redef]
-        ANTHROPIC_VERSION,
         PROXY_ALIASES,
         ContractError,
         HttpError,
@@ -63,7 +60,7 @@ except ImportError:  # run directly: python scripts/smoke_test.py
         try_http_request,
     )
 
-TEST_MODEL = "claude-haiku-4-5"
+TEST_MODEL = "gpt-5.6"
 MAX_OUTPUT_TOKENS = 20
 PROMPT = "Reply with the single word OK."
 
@@ -86,7 +83,7 @@ the customer key. Expect HTTP 403 with role=internal_user:
 
   curl -sS -o /dev/null -w '%{http_code}\\n' -X POST "$LITELLM_BASE_URL/model/new" \\
     -H "Authorization: Bearer $LITELLM_API_KEY" -H 'content-type: application/json' \\
-    -d '{"model_name":"authz-probe","litellm_params":{"model":"azure_ai/claude-haiku-4-5"}}'
+    -d '{"model_name":"authz-probe","litellm_params":{"model":"azure/gpt-5.6"}}'
 
 This script does not send it automatically: a valid body would create a model if
 the script were ever run with an admin key by mistake.
@@ -122,13 +119,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--skip-generation",
         action="store_true",
-        help="skip the two token-consuming requests (steps 4 and 5)",
+        help="skip the token-consuming request (step 4)",
     )
     return parser.parse_args(argv)
 
 
 def check_health(target: str, report: Report, timeout: float) -> None:
-    print("1/7 probe endpoints")
+    print("1/6 probe endpoints")
     for path in ("/health/liveliness", "/health/readiness"):
         status, _, body = try_http_request("GET", f"{target}{path}", timeout=timeout)
         if status != 200:
@@ -145,7 +142,7 @@ def check_health(target: str, report: Report, timeout: float) -> None:
 
 
 def check_models(target: str, key: str, report: Report, timeout: float) -> None:
-    print("2/7 model list")
+    print("2/6 model list")
     try:
         _, _, payload = http_request("GET", f"{target}/v1/models", bearer=key, timeout=timeout)
     except (HttpError, ContractError) as error:
@@ -163,7 +160,7 @@ def check_models(target: str, key: str, report: Report, timeout: float) -> None:
 
 
 def check_chat_completions(target: str, key: str, model: str, report: Report, timeout: float) -> None:
-    print("3/7 POST /v1/chat/completions")
+    print("3/6 POST /v1/chat/completions")
     try:
         _, headers, body = http_request(
             "POST",
@@ -191,33 +188,8 @@ def check_chat_completions(target: str, key: str, model: str, report: Report, ti
         )
 
 
-def check_messages(target: str, key: str, model: str, report: Report, timeout: float) -> None:
-    print("4/7 POST /v1/messages")
-    try:
-        _, headers, body = http_request(
-            "POST",
-            f"{target}/v1/messages",
-            bearer=key,
-            timeout=timeout,
-            headers={"anthropic-version": ANTHROPIC_VERSION},
-            payload={
-                "model": model,
-                "max_tokens": MAX_OUTPUT_TOKENS,
-                "messages": [{"role": "user", "content": PROMPT}],
-            },
-        )
-    except (HttpError, ContractError) as error:
-        report.fail(f"/v1/messages failed: {redact(error)}")
-        return
-    if not isinstance(body, dict) or not body.get("content"):
-        report.fail("/v1/messages returned no content block")
-        return
-    cost = headers.get("x-litellm-response-cost")
-    report.ok(f"/v1/messages answered (recorded cost header: {cost or 'absent'})")
-
-
 def check_invalid_model(target: str, key: str, report: Report, timeout: float) -> None:
-    print("5/7 invalid model is rejected")
+    print("4/6 invalid model is rejected")
     status, _, _ = try_http_request(
         "POST",
         f"{target}/v1/chat/completions",
@@ -236,7 +208,7 @@ def check_invalid_model(target: str, key: str, report: Report, timeout: float) -
 
 
 def check_forbidden_routes(target: str, key: str, report: Report, timeout: float) -> None:
-    print("6/7 management, config and admin routes are denied")
+    print("5/6 management, config and admin routes are denied")
     for method, path, payload in FORBIDDEN_ROUTES:
         status, _, _ = try_http_request(
             method, f"{target}{path}", bearer=key, payload=payload, timeout=timeout
@@ -282,15 +254,13 @@ def main(argv: list[str] | None = None) -> int:
     check_health(target, report, args.timeout)
     check_models(target, key, report, args.timeout)
     if args.skip_generation:
-        print("3/7 POST /v1/chat/completions  SKIPPED (--skip-generation)")
-        print("4/7 POST /v1/messages          SKIPPED (--skip-generation)")
+        print("3/6 POST /v1/chat/completions  SKIPPED (--skip-generation)")
     else:
         check_chat_completions(target, key, args.model, report, args.timeout)
-        check_messages(target, key, args.model, report, args.timeout)
     check_invalid_model(target, key, report, args.timeout)
     check_forbidden_routes(target, key, report, args.timeout)
 
-    print("\n7/7 summary")
+    print("\n6/6 summary")
     if report.warnings:
         print(f"  {len(report.warnings)} warning(s) - review them before going live")
         if any("authorization ran" in warning for warning in report.warnings):

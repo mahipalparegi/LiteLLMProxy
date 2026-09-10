@@ -22,8 +22,8 @@ is chat or completion are exercised. Embedding, image, audio, rerank, batch,
 realtime, OCR and video models are skipped with a warning, because each uses a
 different endpoint that this script does not call.
 
-Both Azure families are checked: azure_ai/ (Foundry Anthropic) and azure/
-(Azure OpenAI).
+Every model must resolve to an azure/ deployment on your own resource. Run this
+after renaming the config aliases to your real Foundry deployment names.
 """
 
 from __future__ import annotations
